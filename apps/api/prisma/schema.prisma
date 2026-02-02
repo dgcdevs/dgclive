@@ -1,64 +1,77 @@
-datasource db {
-	provider = "postgresql"
-	url      = env("DATABASE_URL")
-}
-
 generator client {
-	provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Roles (Kept Simple)
 enum Role {
   MEMBER
   MEDIA
   ADMIN
 }
 
+// 2. Profile (Matches Supabase Auth)
 model Profile {
-  id        String   @id
+  id        String   @id // Maps to Supabase Auth ID
   email     String   @unique
   fullName  String
+  role      Role     @default(MEMBER)
+  isBanned  Boolean  @default(false) // banned from chat
   createdAt DateTime @default(now())
 
-  roles        UserRole[]
-  entitlements Entitlement[]
+  // Relationships
+  inviteId  String?  @unique
+  invite    GlobalInvite? @relation(fields: [inviteId], references: [id])
+  messages  ChatMessage[]
 }
 
-model UserRole {
-  id        String @id @default(cuid())
-  profileId String
-  role      Role
-
-  profile Profile @relation(fields: [profileId], references: [id])
-
-  @@unique([profileId, role])
+// 3. The "Church Entry" Ticket (PRD 6.1)
+// This is what allows them to Register.
+model GlobalInvite {
+  id        String   @id @default(uuid())
+  code      String   @unique // e.g. "GRACE-2026"
+  isUsed    Boolean  @default(false)
+  issuedTo  String?  // e.g. "Deacon John"
+  
+  // Who used it?
+  usedBy    Profile?
 }
 
+// 4. The Livestream Service (PRD 6.2)
+// Renamed 'Event' to 'Livestream' for clarity, or keep 'Event' if you prefer.
 model Event {
-  id        String   @id @default(cuid())
-  title     String
-  startTime DateTime
-  isPublic  Boolean  @default(false)
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  startTime   DateTime
+  isPublic    Boolean  @default(false) // If false, only Members can watch
+  isLive      Boolean  @default(false)
 
-  accessCodes  AccessCode[]
-  entitlements Entitlement[]
+  // --- MUX VIDEO DATA (Critical Addition) ---
+  muxPlaybackId String? // For the Frontend Player
+  muxStreamKey  String? // For OBS (Hidden)
+  muxAssetId    String? // For On-Demand Replay
+
+  // --- INTERACTION ---
+  chatMessages ChatMessage[]
 }
 
-model AccessCode {
-  id        String    @id @default(cuid())
-  code      String    @unique
-  eventId   String
-  expiresAt DateTime?
+// 5. Chat & Comments (PRD 6.3)
+model ChatMessage {
+  id        String   @id @default(uuid())
+  text      String
+  createdAt DateTime @default(now())
 
-  event Event @relation(fields: [eventId], references: [id])
-}
-
-model Entitlement {
-  id        String @id @default(cuid())
+  // Who sent it?
   profileId String
+  profile   Profile @relation(fields: [profileId], references: [id])
+
+  // Which Event?
   eventId   String
-
-  profile Profile @relation(fields: [profileId], references: [id])
-  event   Event   @relation(fields: [eventId], references: [id])
-
-  @@unique([profileId, eventId])
+  event     Event   @relation(fields: [eventId], references: [id])
 }
+
