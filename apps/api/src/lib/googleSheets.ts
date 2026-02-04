@@ -6,7 +6,7 @@ const sheets = google.sheets('v4');
 // Initialize Google Sheets API with service account
 const auth = new google.auth.GoogleAuth({
   credentials: {
-    type: process.env.GOOGLE_PRIVATE_KEY ? 'service_account' : undefined,
+    type: 'service_account' as any,
     project_id: 'telegram-bot-485312',
     private_key_id: '6c566a1e3b4d7d887f6a57cbddccec6bbc554086',
     private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
@@ -15,7 +15,7 @@ const auth = new google.auth.GoogleAuth({
     auth_uri: 'https://accounts.google.com/o/oauth2/auth',
     token_uri: 'https://oauth2.googleapis.com/token',
     auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
-  },
+  } as any,
   scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
 });
 

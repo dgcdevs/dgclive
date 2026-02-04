@@ -88,3 +88,35 @@ export async function testEmailConnection(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Send password reset code email
+ */
+export async function sendPasswordResetEmail(
+  email: string,
+  code: string,
+  userName: string
+): Promise<void> {
+  const mailOptions = {
+    from: process.env.EMAIL_FROM,
+    to: email,
+    subject: 'DGC Password Reset Code',
+    html: `
+      <h2>Password Reset Request</h2>
+      <p>Hi ${userName},</p>
+      <p>We received a request to reset your password. Please use this code to proceed:</p>
+      <h1 style="color: #2563eb; letter-spacing: 5px;">${code}</h1>
+      <p>This code will expire in 15 minutes.</p>
+      <p><strong>If you didn't request this, you can safely ignore this email.</strong></p>
+      <p>Blessings,<br>Davidic Generation Church Tech Team</p>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Password reset email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    throw new Error('Failed to send password reset email');
+  }
+}

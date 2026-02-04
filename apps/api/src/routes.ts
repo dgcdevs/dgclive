@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { register, login, verifyEmail } from './handlers/auth';
+import { forgotPassword, resetPassword } from './handlers/forgotPassword';
 import { getMe } from './handlers/me';
 import { startStream, stopStream } from './handlers/stream';
 import { createInvite } from './handlers/invite';
@@ -14,6 +15,8 @@ const router = Router();
 router.post("/register", register);
 router.post("/verify-email", verifyEmail);
 router.post("/login", login);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password", resetPassword);
 router.get("/me", requireAuth, getMe);
 
 

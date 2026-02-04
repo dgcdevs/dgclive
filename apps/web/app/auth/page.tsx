@@ -11,10 +11,12 @@ import { Check, Mail, Lock, Eye, EyeOff, User, AlertCircle } from "lucide-react"
 import BokehDots from "../components/BokehDots"
 
 type SignupStep = "form" | "verification" | "error"
+type ForgotPasswordStep = "email" | "code" | null
 
 export default function AuthPage() {
 	const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin")
 	const [signupStep, setSignupStep] = useState<SignupStep>("form")
+	const [forgotPasswordStep, setForgotPasswordStep] = useState<ForgotPasswordStep>(null)
 	const router = useRouter()
 	const [isLoading, setIsLoading] = useState(false)
 	const [showPassword, setShowPassword] = useState(false)
@@ -22,12 +24,16 @@ export default function AuthPage() {
 	const [errorMessage, setErrorMessage] = useState("")
 	const [showErrorModal, setShowErrorModal] = useState(false)
 	const [pendingEmail, setPendingEmail] = useState("")
+	const [forgotPasswordEmail, setForgotPasswordEmail] = useState("")
 
 	const [formData, setFormData] = useState({
 		fullName: "",
 		email: "",
 		password: "",
 		confirmPassword: "",
+		resetCode: "",
+		newPassword: "",
+		confirmNewPassword: "",
 		verificationCode: ""
 	})
 
@@ -74,8 +80,9 @@ export default function AuthPage() {
 				setSignupStep("verification")
 				setFormData({ ...formData, verificationCode: "" })
 			}
-		} catch (err: any) {
-			setErrorMessage(err.message)
+		} catch (err: unknown) {
+			const errorMessage = err instanceof Error ? err.message : "Failed to send verification code"
+			setErrorMessage(errorMessage)
 			setShowErrorModal(true)
 		} finally {
 			setIsLoading(false)
@@ -111,10 +118,11 @@ export default function AuthPage() {
 			alert("Account created successfully! Welcome!")
 			setActiveTab("signin")
 			setSignupStep("form")
-			setFormData({ fullName: "", email: "", password: "", confirmPassword: "", verificationCode: "" })
-			router.push("/dashboard")
-		} catch (err: any) {
-			setErrorMessage(err.message)
+		setFormData({ fullName: "", email: "", password: "", confirmPassword: "", resetCode: "", newPassword: "", confirmNewPassword: "", verificationCode: "" })
+		router.push("/dashboard")
+	} catch (err: unknown) {
+		const errorMessage = err instanceof Error ? err.message : "Unknown error"
+		setErrorMessage(errorMessage)
 		} finally {
 			setIsLoading(false)
 		}
@@ -141,14 +149,84 @@ export default function AuthPage() {
 			localStorage.setItem("token", data.token)
 			localStorage.setItem("user", JSON.stringify(data.user))
 			router.push("/dashboard")
-		} catch (err: any) {
-			setErrorMessage(err.message)
+	} catch (err: unknown) {
+		const errorMessage = err instanceof Error ? err.message : "Authentication failed"
+		setErrorMessage(errorMessage)
 		} finally {
 			setIsLoading(false)
 		}
 	}
 
 	const handleAuth = activeTab === "signin" ? handleSignin : handleSignup
+
+	const handleForgotPasswordEmail = async (e: React.FormEvent) => {
+		e.preventDefault()
+		setIsLoading(true)
+		setErrorMessage("")
+
+		try {
+			const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/forgot-password`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ email: forgotPasswordEmail })
+			})
+
+			const data = await res.json()
+
+			if (!res.ok) {
+				throw new Error(data.error || "Failed to send reset code")
+			}
+
+			setForgotPasswordStep("code")
+	} catch (err: unknown) {
+		const errorMessage = err instanceof Error ? err.message : "Failed to send reset code"
+		setErrorMessage(errorMessage)
+		} finally {
+			setIsLoading(false)
+		}
+	}
+
+	const handleResetPassword = async (e: React.FormEvent) => {
+		e.preventDefault()
+		setIsLoading(true)
+		setErrorMessage("")
+
+		if (formData.newPassword !== formData.confirmNewPassword) {
+			setErrorMessage("Passwords do not match")
+			setIsLoading(false)
+			return
+		}
+
+		try {
+			const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reset-password`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					email: forgotPasswordEmail,
+					code: formData.resetCode,
+					newPassword: formData.newPassword,
+					confirmPassword: formData.confirmNewPassword
+				})
+			})
+
+			const data = await res.json()
+
+			if (!res.ok) {
+				throw new Error(data.error || "Failed to reset password")
+			}
+
+			alert("Password reset successfully! Please sign in with your new password.")
+			setForgotPasswordStep(null)
+			setForgotPasswordEmail("")
+			setFormData({ ...formData, resetCode: "", newPassword: "", confirmNewPassword: "" })
+			setActiveTab("signin")
+	} catch (err: unknown) {
+		const errorMessage = err instanceof Error ? err.message : "Failed to reset password"
+		setErrorMessage(errorMessage)
+		} finally {
+			setIsLoading(false)
+		}
+	}
 
 	return (
 		<div className="relative min-h-screen w-full overflow-hidden bg-brand-dark">
@@ -340,7 +418,22 @@ export default function AuthPage() {
 									</div>
 
 									<div className="space-y-2">
-										<Label>Password</Label>
+										<div className="flex justify-between items-center">
+											<Label>Password</Label>
+											{activeTab === "signin" && (
+												<button
+													type="button"
+													onClick={() => {
+														setForgotPasswordStep("email")
+														setActiveTab("signin")
+														setErrorMessage("")
+													}}
+													className="text-xs text-brand-purple hover:text-brand-purple/80 transition-colors"
+												>
+													Forgot?
+												</button>
+											)}
+										</div>
 										<div className="relative">
 											<Input
 												name="password"
@@ -409,7 +502,136 @@ export default function AuthPage() {
 				</div>
 			</div>
 
-			{/* Error Modal - Not Registered */}
+			{/* Forgot Password Modal */}
+		{forgotPasswordStep && (
+			<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+				<div className="relative w-full max-w-md mx-4 bg-brand-dark border border-white/20 rounded-2xl p-8 space-y-6">
+					{/* Close Button */}
+					<button
+						onClick={() => {
+							setForgotPasswordStep(null)
+							setForgotPasswordEmail("")
+							setFormData({ ...formData, resetCode: "", newPassword: "", confirmNewPassword: "" })
+							setErrorMessage("")
+						}}
+						className="absolute top-4 right-4 text-white/40 hover:text-white"
+					>
+						✕
+					</button>
+
+					{/* Email Step */}
+					{forgotPasswordStep === "email" && (
+						<form className="space-y-5" onSubmit={handleForgotPasswordEmail}>
+							<div className="text-center space-y-2">
+								<h2 className="text-2xl font-semibold text-white">Reset Password</h2>
+								<p className="text-white/60 text-sm">Enter your email to receive a reset code</p>
+							</div>
+
+							<div className="space-y-2">
+								<Label>Email</Label>
+								<Input
+									type="email"
+									value={forgotPasswordEmail}
+									onChange={(e) => setForgotPasswordEmail(e.target.value)}
+									placeholder="Enter your email"
+									className="bg-black"
+									icon={<Mail className="w-4 h-4" />}
+								/>
+							</div>
+
+							{errorMessage && (
+								<div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3">
+									<p className="text-red-300 text-sm">{errorMessage}</p>
+								</div>
+							)}
+
+							<Button
+								type="submit"
+								disabled={isLoading || !forgotPasswordEmail}
+								className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+							>
+								{isLoading ? "Sending..." : "Send Reset Code"}
+							</Button>
+						</form>
+					)}
+
+					{/* Code & New Password Step */}
+					{forgotPasswordStep === "code" && (
+						<form className="space-y-5" onSubmit={handleResetPassword}>
+							<div className="text-center space-y-2">
+								<h2 className="text-2xl font-semibold text-white">Enter Reset Code</h2>
+								<p className="text-white/60 text-sm">
+									Code sent to <span className="text-white/80">{forgotPasswordEmail}</span>
+								</p>
+							</div>
+
+							<div className="space-y-2">
+								<Label>Reset Code</Label>
+								<Input
+									name="resetCode"
+									value={formData.resetCode}
+									onChange={handleChange}
+									placeholder="Enter 6-digit code"
+									maxLength={6}
+									className="bg-black text-center tracking-widest text-2xl"
+								/>
+							</div>
+
+							<div className="space-y-2">
+								<Label>New Password</Label>
+								<Input
+									name="newPassword"
+									type="password"
+									value={formData.newPassword}
+									onChange={handleChange}
+									placeholder="Enter new password"
+									className="bg-black"
+									icon={<Lock className="w-4 h-4" />}
+								/>
+							</div>
+
+							<div className="space-y-2">
+								<Label>Confirm New Password</Label>
+								<Input
+									name="confirmNewPassword"
+									type="password"
+									value={formData.confirmNewPassword}
+									onChange={handleChange}
+									placeholder="Confirm new password"
+									className="bg-black"
+									icon={<Lock className="w-4 h-4" />}
+								/>
+							</div>
+
+							{errorMessage && (
+								<div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3">
+									<p className="text-red-300 text-sm">{errorMessage}</p>
+								</div>
+							)}
+
+							<Button
+								type="submit"
+								disabled={isLoading || formData.resetCode.length !== 6}
+								className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+							>
+								{isLoading ? "Resetting..." : "Reset Password"}
+							</Button>
+
+							<Button
+								type="button"
+								onClick={() => setForgotPasswordStep("email")}
+								variant="outline"
+								className="w-full border-white/20 text-white hover:bg-white/5"
+							>
+								Back
+							</Button>
+						</form>
+					)}
+				</div>
+			</div>
+		)}
+
+		{/* Error Modal - Not Registered */}
 			{showErrorModal && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
 					<div className="relative w-full max-w-md mx-4 bg-brand-dark border border-white/20 rounded-2xl p-8 space-y-6">
@@ -444,7 +666,7 @@ export default function AuthPage() {
 							onClick={() => {
 								setShowErrorModal(false)
 								setErrorMessage("")
-								setFormData({ fullName: "", email: "", password: "", confirmPassword: "", verificationCode: "" })
+								setFormData({ fullName: "", email: "", password: "", confirmPassword: "", resetCode: "", newPassword: "", confirmNewPassword: "", verificationCode: "" })
 								setActiveTab("signin")
 							}}
 							className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
