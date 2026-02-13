@@ -26,6 +26,12 @@ export function SmallEventCard({
         >
             {/* Thumbnail */}
             <div className="relative aspect-video w-full bg-zinc-800">
+                {/* Placeholder Image Logic (if no thumbnail provided) */}
+                <div
+                    className="absolute inset-0 bg-zinc-800 bg-cover bg-center"
+                    style={thumbnail ? { backgroundImage: `url(${thumbnail})` } : undefined}
+                />
+                
                 {/* Gradient Overlay */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
 
@@ -34,9 +40,6 @@ export function SmallEventCard({
                     <Clock className="w-3 h-3 text-brand-purple" />
                     <span className="text-[10px] font-bold text-white uppercase tracking-wide">{date}</span>
                 </div>
-
-                {/* Placeholder Image Logic (if no thumbnail provided) */}
-                <div className="absolute inset-0 bg-zinc-800" />
             </div>
 
             {/* Content */}

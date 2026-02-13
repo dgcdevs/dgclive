@@ -22,9 +22,13 @@ type ArchiveVideo = {
 
 export function MemberDashboard() {
     const [archives, setArchives] = useState<ArchiveVideo[]>([])
+    const [demoLiveVideos, setDemoLiveVideos] = useState<ArchiveVideo[]>([])
+    const [demoUpcomingVideos, setDemoUpcomingVideos] = useState<ArchiveVideo[]>([])
     const [isLoadingArchives, setIsLoadingArchives] = useState(true)
     const [archiveError, setArchiveError] = useState("")
     const [hasToken, setHasToken] = useState(false)
+    const [displayCount, setDisplayCount] = useState(12)
+    const [isLoadingMore, setIsLoadingMore] = useState(false)
 
     useEffect(() => {
         const loadArchives = async () => {
@@ -41,7 +45,7 @@ export function MemberDashboard() {
                 }
 
                 setHasToken(true)
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/archive?source=all&take=12`, {
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/archive?source=all&take=100`, {
                     headers: {
                         Authorization: `Bearer ${token}`
                     }
@@ -52,7 +56,15 @@ export function MemberDashboard() {
                     throw new Error(data.error || "Failed to load archives")
                 }
 
-                setArchives(data.archives || [])
+                const archivesList = data.archives || []
+                setArchives(archivesList)
+
+                // Get random demo videos for live and upcoming sections
+                if (archivesList.length > 0) {
+                    const shuffled = [...archivesList].sort(() => 0.5 - Math.random())
+                    setDemoLiveVideos(shuffled.slice(0, 2))
+                    setDemoUpcomingVideos(shuffled.slice(2, 7))
+                }
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "Failed to load archives"
                 setArchiveError(errorMessage)
@@ -63,6 +75,14 @@ export function MemberDashboard() {
 
         void loadArchives()
     }, [])
+
+    const handleLoadMore = async () => {
+        setIsLoadingMore(true)
+        // Simulate a small delay for UX
+        await new Promise(resolve => setTimeout(resolve, 300))
+        setDisplayCount(prev => prev + 9)
+        setIsLoadingMore(false)
+    }
 
     const formatDate = (value: string) => {
         const date = new Date(value)
@@ -81,22 +101,23 @@ export function MemberDashboard() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <VideoCard
-                        type="live"
-                        title="Sunday Service || Spiritual Warfare || Pastor Lawrence Oyor"
-                        preacher="Davidic Generation Church"
-                        church="3.2K chat messages"
-                        views={24847}
-                        isFeatured={true}
-                    />
-                    <VideoCard
-                        type="live"
-                        title="Sunday Service || Spiritual Warfare || Pastor Godswill Oyor"
-                        preacher="Davidic Generation Church Lagos"
-                        church="3.2K chat messages"
-                        views={24847}
-                        isFeatured={true}
-                    />
+                    {demoLiveVideos.slice(0, 2).map((video) => {
+                        const isYouTube = video.source === "youtube"
+                        return (
+                            <VideoCard
+                                key={video.id}
+                                type="live"
+                                title={video.title}
+                                preacher={video.channelTitle || "Davidic Generation Church"}
+                                church="3.2K chat messages"
+                                views={Math.floor(Math.random() * 50000) + 1000}
+                                isFeatured={true}
+                                thumbnail={video.thumbnailUrl}
+                                source={video.source}
+                                href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
+                            />
+                        )
+                    })}
                 </div>
             </section>
 
@@ -106,41 +127,23 @@ export function MemberDashboard() {
 
                 {/* Horizontal Scroll Container */}
                 <div className="flex overflow-x-auto gap-4 pb-4 -mx-6 px-6 scrollbar-hide">
-                    <SmallEventCard
-                        id="1"
-                        date="Fri, 6:00 PM"
-                        title="12 Hours Prayer Charge"
-                        churchName="Davidic Generation Church"
-                        waitingCount={11}
-                    />
-                    <SmallEventCard
-                        id="2"
-                        date="Fri, 6:00 PM"
-                        title="Global Workers Retreat"
-                        churchName="Davidic Generation Church"
-                        waitingCount={11}
-                    />
-                    <SmallEventCard
-                        id="3"
-                        date="Fri, 6:00 PM"
-                        title="CTRL+SHIFT"
-                        churchName="Davidic Generation Church"
-                        waitingCount={200}
-                    />
-                    <SmallEventCard
-                        id="4"
-                        date="Fri, 6:00 PM"
-                        title="Battle Axe Retreat - UK"
-                        churchName="Davidic Generation Church"
-                        waitingCount={200}
-                    />
-                    <SmallEventCard
-                        id="5"
-                        date="Fri, 6:00 PM"
-                        title="Prophetic Worship"
-                        churchName="Davidic Generation Church"
-                        waitingCount={45}
-                    />
+                    {demoUpcomingVideos.map((video) => {
+                        const times = ["Mon, 6:00 PM", "Wed, 7:00 PM", "Fri, 6:00 PM", "Sat, 10:00 AM", "Sun, 9:30 AM"]
+                        const randomTime = times[Math.floor(Math.random() * times.length)]
+                        const randomWaiting = Math.floor(Math.random() * 200) + 10
+                        
+                        return (
+                            <SmallEventCard
+                                key={video.id}
+                                id={video.youtubeId || video.id}
+                                date={randomTime}
+                                title={video.title}
+                                churchName={video.channelTitle || "Davidic Generation Church"}
+                                waitingCount={randomWaiting}
+                                thumbnail={video.thumbnailUrl}
+                            />
+                        )
+                    })}
                 </div>
             </section>
 
@@ -157,28 +160,41 @@ export function MemberDashboard() {
                 ) : archives.length === 0 ? (
                     <p className="text-white/60">No archived sermons available yet.</p>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {archives.map((video) => {
-                            const isYouTube = video.source === "youtube"
-                            const viewText = video.viewCount
-                                ? `${video.viewCount.toLocaleString()} views`
-                                : "Members only"
+                    <>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {archives.slice(0, displayCount).map((video) => {
+                                const isYouTube = video.source === "youtube"
+                                const viewText = video.viewCount
+                                    ? `${video.viewCount.toLocaleString()} views`
+                                    : "Members only"
 
-                            return (
-                                <VideoCard
-                                    key={video.id}
-                                    type="vod"
-                                    title={video.title}
-                                    preacher={video.channelTitle || "Davidic Generation Church"}
-                                    church={viewText}
-                                    date={formatDate(video.publishedAt)}
-                                    thumbnail={video.thumbnailUrl}
-                                    source={video.source}
-                                    href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
-                                />
-                            )
-                        })}
-                    </div>
+                                return (
+                                    <VideoCard
+                                        key={video.id}
+                                        type="vod"
+                                        title={video.title}
+                                        preacher={video.channelTitle || "Davidic Generation Church"}
+                                        church={viewText}
+                                        date={formatDate(video.publishedAt)}
+                                        thumbnail={video.thumbnailUrl}
+                                        source={video.source}
+                                        href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
+                                    />
+                                )
+                            })}
+                        </div>
+                        {displayCount < archives.length && (
+                            <div className="flex justify-center mt-8">
+                                <button
+                                    onClick={handleLoadMore}
+                                    disabled={isLoadingMore}
+                                    className="px-8 py-3 bg-brand-purple hover:bg-brand-purple/90 disabled:bg-brand-purple/50 text-white font-bold rounded-lg transition-colors disabled:cursor-not-allowed"
+                                >
+                                    {isLoadingMore ? "Loading..." : "Load More"}
+                                </button>
+                            </div>
+                        )}
+                    </>
                 )}
             </section>
 
