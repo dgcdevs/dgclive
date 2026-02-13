@@ -34,16 +34,60 @@ export const getLiveStream = async (req: Request, res: Response) => {
 // Phase 6: Reflection (Get past sermons)
 export const getArchives = async (req: Request, res: Response) => {
   try {
-    const archives = await prisma.event.findMany({
-      where: { 
-        isLive: false,      // Show finished streams
-        isPublic: true      // Only show ones marked public/safe
-      },
-      orderBy: { startTime: 'desc' }, // Newest first
-      take: 20 // Pagination (Start with 20)
-    });
+    const source = typeof req.query.source === 'string' ? req.query.source : 'all';
+    const take = Number(req.query.take || 20);
 
-    res.json({ archives });
+    const shouldIncludeMux = source === 'all' || source === 'mux';
+    const shouldIncludeYouTube = source === 'all' || source === 'youtube';
+
+    const [muxArchives, youtubeArchives] = await Promise.all([
+      shouldIncludeMux
+        ? prisma.event.findMany({
+            where: {
+              isLive: false,
+              isPublic: true,
+              muxAssetId: { not: null }
+            },
+            orderBy: { startTime: 'desc' },
+            take
+          })
+        : Promise.resolve([]),
+      shouldIncludeYouTube
+        ? prisma.youTubeVideo.findMany({
+            orderBy: { publishedAt: 'desc' },
+            take
+          })
+        : Promise.resolve([])
+    ]);
+
+    const combined = [
+      ...muxArchives.map((event) => ({
+        id: event.id,
+        title: event.title,
+        description: event.description || '',
+        thumbnailUrl: '',
+        publishedAt: event.startTime,
+        viewCount: 0,
+        source: 'mux' as const,
+        muxPlaybackId: event.muxPlaybackId,
+        muxAssetId: event.muxAssetId
+      })),
+      ...youtubeArchives.map((video) => ({
+        id: video.id,
+        title: video.title,
+        description: video.description,
+        thumbnailUrl: video.thumbnailUrl,
+        publishedAt: video.publishedAt,
+        viewCount: video.viewCount,
+        source: 'youtube' as const,
+        youtubeId: video.youtubeId,
+        channelTitle: video.channelTitle
+      }))
+    ]
+      .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+      .slice(0, take);
+
+    res.json({ archives: combined });
 
   } catch (error) {
     res.status(500).json({ error: "Failed to load archives" });

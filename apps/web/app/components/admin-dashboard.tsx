@@ -9,6 +9,11 @@ export function AdminDashboard() {
     const [users, setUsers] = useState<any[]>([]);
     const [invites, setInvites] = useState<any[]>([]);
 
+    // YouTube Sync State
+    const [isSyncingYouTube, setIsSyncingYouTube] = useState(false);
+    const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+    const [syncResult, setSyncResult] = useState<{ added: number; updated: number; total: number } | null>(null);
+
     // Notification State
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | null }>({ message: '', type: null });
 
@@ -174,6 +179,33 @@ export function AdminDashboard() {
         }
     };
 
+    const handleSyncYouTube = async () => {
+        try {
+            setIsSyncingYouTube(true);
+
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/sync-youtube`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ forceFullSync: false })
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Sync failed");
+
+            setSyncResult(data);
+            setLastSyncTime(new Date().toLocaleString());
+            showNotification(`YouTube Sync Complete: ${data.added} added, ${data.updated} updated`, "success");
+
+        } catch (err: any) {
+            showNotification(err.message, "error");
+        } finally {
+            setIsSyncingYouTube(false);
+        }
+    };
+
     return (
         <div className="min-h-screen bg-[#0A0A0A] text-white pb-24 font-sans selection:bg-[#A828FF]/30 relative">
             {/* Notification Toast */}
@@ -321,7 +353,52 @@ export function AdminDashboard() {
                     </div>
                 </section>
 
-                {/* Section 3: The Flock */}
+                {/* Section 3: Content Sync (YouTube) */}
+                <section className="space-y-4">
+                    <h2 className="text-xs font-bold text-white/40 uppercase tracking-widest">Content Library</h2>
+
+                    <div className="bg-[#111111] border border-white/5 rounded-2xl p-6 space-y-6">
+                        <div className="space-y-2">
+                            <h3 className="text-sm font-bold text-white">YouTube Sermon Archive Sync</h3>
+                            <p className="text-xs text-white/50">Automatically synchronize past sermons from YouTube to make them available to members on this platform.</p>
+                        </div>
+
+                        {lastSyncTime && (
+                            <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                                <p className="text-[10px] text-blue-400 font-bold">Last Sync: {lastSyncTime}</p>
+                                {syncResult && (
+                                    <p className="text-xs text-blue-300 mt-1">
+                                        Added: {syncResult.added} | Updated: {syncResult.updated} | Total: {syncResult.total}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        <button
+                            onClick={handleSyncYouTube}
+                            disabled={isSyncingYouTube}
+                            className={`w-full py-3 rounded-xl font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                                isSyncingYouTube
+                                    ? 'bg-white/5 border border-white/10 text-white/50 cursor-not-allowed'
+                                    : 'bg-orange-500/20 border border-orange-500/30 hover:bg-orange-500/30 text-orange-400 hover:text-orange-300'
+                            }`}
+                        >
+                            {isSyncingYouTube ? (
+                                <>
+                                    <div className="animate-spin h-4 w-4 border-2 border-orange-400 border-t-transparent rounded-full" />
+                                    Syncing...
+                                </>
+                            ) : (
+                                <>
+                                    <BarChart3 className="h-4 w-4" />
+                                    Sync YouTube Videos
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </section>
+
+                {/* Section 4: The Flock */}
                 <section className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h2 className="text-xs font-bold text-white/40 uppercase tracking-widest">The Flock</h2>

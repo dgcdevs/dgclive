@@ -5,7 +5,7 @@ import { getMe } from './handlers/me';
 import { startStream, stopStream } from './handlers/stream';
 import { createInvite } from './handlers/invite';
 import { requireAuth, requireAdmin, requireMediaOrAdmin } from './middleware/requireAuth';
-import { banUser, getUsers, getInvites, updateUserRole } from './handlers/admin';
+import { banUser, getUsers, getInvites, updateUserRole, syncYouTubeVideos } from './handlers/admin';
 import { getLiveStream, getArchives } from './handlers/content';
 import { sendMessage, getMessages } from './handlers/chat';
 
@@ -38,5 +38,6 @@ router.patch('/users/:userId/role', requireAuth, requireAdmin, updateUserRole); 
 router.post('/stream/start', requireAuth, requireMediaOrAdmin, startStream);
 router.post('/stream/stop', requireAuth, requireMediaOrAdmin, stopStream);
 router.post('/users/:userId/ban', requireAuth, requireAdmin, banUser);
+router.post('/admin/sync-youtube', requireAuth, requireAdmin, syncYouTubeVideos);
 
 export default router;

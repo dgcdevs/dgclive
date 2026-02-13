@@ -29,7 +29,7 @@ export function Navbar() {
     const canAccessMedia = hasRole(["MEDIA", "ADMIN"])
 
     return (
-        <nav className="sticky top-0 z-50 w-full bg-brand-dark border-b border-white/5">
+        <nav className="sticky top-0 z-50 w-full bg-brand-bg border-b border-white/5">
             <div className="container mx-auto flex h-16 items-center justify-between px-4">
                 {/* LEFT: Logo + Navigation */}
                 <div className="flex items-center gap-8">
