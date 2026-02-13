@@ -53,6 +53,7 @@
   /* DGC Live Brand Colors */
   --color-brand-purple: #9d00ff;
   --color-brand-dark: #12001f;
+  --color-brand-bg: #07000c;
   --color-brand-card: #1a0b2e;
   --color-brand-gold: #ffd700;
   --color-brand-magenta: #d90368;
@@ -69,6 +70,7 @@
   /* DGC Live Brand Colors */
   --color-brand-purple: var(--color-brand-purple);
   --color-brand-dark: var(--color-brand-dark);
+  --color-brand-bg: var(--color-brand-bg);
   --color-brand-card: var(--color-brand-card);
   --color-brand-gold: var(--color-brand-gold);
   --color-brand-magenta: var(--color-brand-magenta);

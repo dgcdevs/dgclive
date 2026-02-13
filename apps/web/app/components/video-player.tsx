@@ -1,25 +1,41 @@
 import { Play, Volume2, Settings, Maximize, Pause } from "lucide-react"
 
-import { cn } from "../lib/utils"
-
 interface VideoPlayerProps {
     thumbnail?: string
     isLive?: boolean
     viewerCount?: number
+    youtubeId?: string
+    muxPlaybackId?: string
 }
 
-export function VideoPlayer({ thumbnail, isLive = false, viewerCount }: VideoPlayerProps) {
+export function VideoPlayer({ thumbnail, isLive = false, viewerCount, youtubeId }: VideoPlayerProps) {
+    const isYouTube = Boolean(youtubeId)
     return (
         <div className="group relative aspect-video w-full overflow-hidden rounded-xl bg-black border border-white/10">
             {/* Main Content (Placeholder for actual video) */}
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
-                {/* Simulated content or Thumbnail */}
-                <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
+            <div
+                className="absolute inset-0 flex items-center justify-center bg-zinc-900 bg-cover bg-center"
+                style={thumbnail && !isYouTube ? { backgroundImage: `url(${thumbnail})` } : undefined}
+            >
+                {isYouTube ? (
+                    <iframe
+                        className="absolute inset-0 h-full w-full"
+                        src={`https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`}
+                        title="YouTube video player"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                    />
+                ) : (
+                    <>
+                        {/* Simulated content or Thumbnail */}
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/60" />
 
-                {/* Center Play Button */}
-                <div className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-brand-purple/90 text-white shadow-[0_0_20px_rgba(147,51,234,0.5)] transition-transform hover:scale-110 cursor-pointer backdrop-blur-sm border border-white/20">
-                    <Play className="h-6 w-6 fill-current ml-1" />
-                </div>
+                        {/* Center Play Button */}
+                        <div className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-brand-purple/90 text-white shadow-[0_0_20px_rgba(147,51,234,0.5)] transition-transform hover:scale-110 cursor-pointer backdrop-blur-sm border border-white/20">
+                            <Play className="h-6 w-6 fill-current ml-1" />
+                        </div>
+                    </>
+                )}
             </div>
 
             {/* Top Overlay */}

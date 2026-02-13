@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Logo } from "./logo"
-import { Search, Bell, Calendar, User, Home, ChevronDown, LayoutDashboard, Video, LogOut } from "lucide-react"
+import { Search, Bell, Calendar, User, Home, LayoutDashboard, Video, LogOut } from "lucide-react"
 
 import { useUser } from "../../lib/use-user"
 
@@ -13,11 +13,20 @@ export function Navbar() {
     const router = useRouter()
     const { hasRole, user } = useUser()
     const [showUserMenu, setShowUserMenu] = useState(false)
+    const [searchQuery, setSearchQuery] = useState("")
 
     const handleSignOut = () => {
         localStorage.removeItem('token')
         localStorage.removeItem('user')
         window.location.href = '/auth' // Force refresh to clear state
+    }
+
+    const handleSearch = (e: React.FormEvent) => {
+        e.preventDefault()
+        if (searchQuery.trim()) {
+            router.push(`/search?q=${encodeURIComponent(searchQuery)}`)
+            setSearchQuery("")
+        }
     }
 
     const isActive = (path: string) => {
@@ -29,7 +38,7 @@ export function Navbar() {
     const canAccessMedia = hasRole(["MEDIA", "ADMIN"])
 
     return (
-        <nav className="sticky top-0 z-50 w-full bg-brand-dark border-b border-white/5">
+        <nav className="sticky top-0 z-50 w-full bg-brand-bg border-b border-white/5">
             <div className="container mx-auto flex h-16 items-center justify-between px-4">
                 {/* LEFT: Logo + Navigation */}
                 <div className="flex items-center gap-8">
@@ -73,13 +82,15 @@ export function Navbar() {
                 {/* RIGHT: Search + Actions */}
                 <div className="flex items-center gap-4">
                     {/* Search Bar - Desktop */}
-                    <div className="hidden lg:block relative w-64 xl:w-80">
+                    <form onSubmit={handleSearch} className="hidden lg:block relative w-64 xl:w-80">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
                         <input
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full rounded-full border border-white/10 bg-white/5 py-1.5 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand-purple placeholder:text-white/30 h-9 transition-all focus:bg-white/10"
                             placeholder="Search..."
                         />
-                    </div>
+                    </form>
 
                     {/* Admin/Media Team Button */}
                     {canAccessMedia && (

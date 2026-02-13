@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { supabaseAdmin } from '../lib/supabaseAdmin';
+import { fetchChannelVideos } from '../lib/youtube';
 
 // Phase 4: Discipline (Ban User)
 export const banUser = async (req: Request, res: Response) => {
@@ -102,5 +103,87 @@ export const getInvites = async (req: Request, res: Response) => {
     } catch (error) {
         console.error("Failed to fetch invites", error);
         res.status(500).json({ error: "Failed to fetch invites" });
+    }
+};
+
+// 3. Sync YouTube Past Live Videos (Admin Only)
+// Fetches completed broadcasts (past live videos) from the YouTube channel
+export const syncYouTubeVideos = async (req: Request, res: Response) => {
+    try {
+        const { forceFullSync } = req.body ?? {};
+
+        const latestVideo = await prisma.youTubeVideo.findFirst({
+            orderBy: { publishedAt: 'desc' },
+            select: { publishedAt: true }
+        });
+
+        const publishedAfter = forceFullSync
+            ? undefined
+            : latestVideo?.publishedAt?.toISOString();
+
+        let pageToken: string | undefined = undefined;
+        let added = 0;
+        let updated = 0;
+        let total = 0;
+
+        do {
+            const { videos, nextPageToken } = await fetchChannelVideos({
+                pageToken,
+                maxResults: 25,
+                publishedAfter
+            });
+
+            for (const video of videos) {
+                total += 1;
+                const exists = await prisma.youTubeVideo.findUnique({
+                    where: { youtubeId: video.youtubeId },
+                    select: { id: true }
+                });
+
+                await prisma.youTubeVideo.upsert({
+                    where: { youtubeId: video.youtubeId },
+                    update: {
+                        title: video.title,
+                        description: video.description,
+                        thumbnailUrl: video.thumbnailUrl,
+                        duration: video.durationSeconds,
+                        publishedAt: new Date(video.publishedAt),
+                        viewCount: video.viewCount,
+                        channelId: video.channelId,
+                        channelTitle: video.channelTitle,
+                        syncedAt: new Date()
+                    },
+                    create: {
+                        youtubeId: video.youtubeId,
+                        title: video.title,
+                        description: video.description,
+                        thumbnailUrl: video.thumbnailUrl,
+                        duration: video.durationSeconds,
+                        publishedAt: new Date(video.publishedAt),
+                        viewCount: video.viewCount,
+                        channelId: video.channelId,
+                        channelTitle: video.channelTitle
+                    }
+                });
+
+                if (exists) {
+                    updated += 1;
+                } else {
+                    added += 1;
+                }
+            }
+
+            pageToken = nextPageToken;
+        } while (pageToken);
+
+        res.json({
+            success: true,
+            added,
+            updated,
+            total
+        });
+    } catch (error) {
+        console.error("Failed to sync YouTube videos", error);
+        res.status(500).json({ error: "Failed to sync YouTube videos" });
     }
 };

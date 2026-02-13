@@ -12,6 +12,8 @@ interface VideoCardProps {
     views?: number
     date?: string
     isFeatured?: boolean
+    href?: string
+    source?: "youtube" | "mux"
 }
 
 export function VideoCard({
@@ -23,15 +25,20 @@ export function VideoCard({
     views,
     date,
     isFeatured = false,
+    href = "/watch/1",
+    source = "mux",
 }: VideoCardProps) {
     return (
         <Link
-            href="/watch/1"
+            href={href}
             className={cn("group block relative overflow-hidden rounded-xl bg-brand-card/30 border border-white/5 hover:border-brand-purple/50 transition-all duration-300",
                 isFeatured ? "aspect-[16/9]" : "aspect-video"
             )}>
             {/* Thumbnail Image (Placeholder) */}
-            <div className="absolute inset-0 bg-zinc-800">
+            <div
+                className="absolute inset-0 bg-zinc-800 bg-cover bg-center"
+                style={_thumbnail ? { backgroundImage: `url(${_thumbnail})` } : undefined}
+            >
                 {/* <Image src={thumbnail} alt={title} fill className="object-cover opacity-60 group-hover:opacity-40 transition-opacity" /> */}
                 <div className="absolute inset-0 bg-gradient-to-t from-brand-dark via-transparent to-transparent" />
             </div>
@@ -42,6 +49,14 @@ export function VideoCard({
                     <span className="flex items-center gap-1.5 rounded bg-[#FF0000] px-2 py-0.5 text-[10px] font-bold tracking-wider text-white shadow-[0_0_10px_rgba(255,0,0,0.4)] animate-pulse">
                         <span className="h-1.5 w-1.5 rounded-full bg-white" />
                         LIVE
+                    </span>
+                )}
+                {type === "vod" && (
+                    <span className={cn(
+                        "rounded px-2 py-0.5 text-[10px] font-bold tracking-wider text-white",
+                        source === "youtube" ? "bg-red-500/90" : "bg-brand-purple/90"
+                    )}>
+                        {source === "youtube" ? "YOUTUBE" : "ON SITE"}
                     </span>
                 )}
             </div>
