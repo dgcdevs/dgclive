@@ -8,7 +8,7 @@ const app = express();
 
 // 1. Security & Configuration
 app.use(cors({
-	origin: 'http://localhost:3000', // Allow only your frontend
+	origin: ['http://localhost:3000', 'http://192.168.56.1:3000'], // Allow frontend on localhost and network IP
 	credentials: true // Allow cookies/headers if needed
 }));
 app.use(express.json());

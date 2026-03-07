@@ -56,6 +56,8 @@ model Event {
   muxStreamKey  String? // For OBS (Hidden)
   muxAssetId    String? // For On-Demand Replay
 
+  thumbnailUrl  String? // <--- Uploaded by User
+
   // --- INTERACTION ---
   chatMessages ChatMessage[]
 }

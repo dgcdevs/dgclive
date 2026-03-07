@@ -3,6 +3,7 @@
 import { Play, Calendar, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
+import { io as socketIO } from "socket.io-client"
 import { VideoCard } from "./video-card"
 import { SmallEventCard } from "./small-event-card"
 import { NewsletterBanner } from "./newsletter-banner"
@@ -29,6 +30,54 @@ export function MemberDashboard() {
     const [hasToken, setHasToken] = useState(false)
     const [displayCount, setDisplayCount] = useState(12)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
+
+    // NEW states for Live Stream
+    const [liveStream, setLiveStream] = useState<any>(null)
+    const [isLoadingLiveStream, setIsLoadingLiveStream] = useState(true)
+
+    const loadLiveStream = async () => {
+        try {
+            setIsLoadingLiveStream(true)
+            const token = localStorage.getItem("token")
+            const headers: Record<string, string> = {}
+            if (token) headers.Authorization = `Bearer ${token}`
+
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
+            if (res.ok) {
+                const data = await res.json()
+                setLiveStream(data)
+            } else {
+                setLiveStream(null)
+            }
+        } catch (error) {
+            console.error("Failed to load live stream:", error)
+            setLiveStream(null)
+        } finally {
+            setIsLoadingLiveStream(false)
+        }
+    }
+
+    useEffect(() => {
+        loadLiveStream()
+
+        // Listen for global stream published events
+        const socket = socketIO(process.env.NEXT_PUBLIC_API_URL!.replace('/api', '') || 'http://localhost:3001', {
+            transports: ['websocket'],
+        })
+
+        socket.on('STREAM_PUBLISHED', () => {
+            console.log("Stream just went public! Refreshing live stream data...")
+            loadLiveStream()
+        })
+
+        socket.on('STREAM_ENDED', () => {
+            setLiveStream(null)
+        })
+
+        return () => {
+            socket.disconnect()
+        }
+    }, [])
 
     useEffect(() => {
         const loadArchives = async () => {
@@ -92,34 +141,80 @@ export function MemberDashboard() {
     return (
         <div className="space-y-12 pb-12">
             {/* 1. NOW LIVE / FEATURED SECTION */}
-            <section>
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="bg-red-500/20 text-red-500 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-2 animate-pulse border border-red-500/20">
-                        <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
-                        Now Live
+            {isLoadingLiveStream ? (
+                <div className="animate-pulse h-[340px] bg-white/5 rounded-2xl w-full border border-white/5"></div>
+            ) : liveStream && liveStream.isLive && liveStream.isPublished ? (
+                <section>
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="bg-red-500/20 text-red-500 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-2 animate-pulse border border-red-500/20">
+                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                            Now Live
+                        </div>
                     </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {demoLiveVideos.slice(0, 2).map((video) => {
-                        const isYouTube = video.source === "youtube"
-                        return (
-                            <VideoCard
-                                key={video.id}
-                                type="live"
-                                title={video.title}
-                                preacher={video.channelTitle || "Davidic Generation Church"}
-                                church="3.2K chat messages"
-                                views={Math.floor(Math.random() * 50000) + 1000}
-                                isFeatured={true}
-                                thumbnail={video.thumbnailUrl}
-                                source={video.source}
-                                href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
-                            />
-                        )
-                    })}
-                </div>
-            </section>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <Link
+                            href={`/watch/${liveStream.id}?source=mux`}
+                            className="group block relative overflow-hidden rounded-xl bg-brand-card/30 border border-white/5 hover:border-brand-purple/50 transition-all duration-300 aspect-[16/9]"
+                        >
+                            {/* Live MuxPlayer preview — muted autoplay */}
+                            {liveStream.playbackId ? (
+                                <mux-player
+                                    stream-type="ll-live"
+                                    playback-id={liveStream.playbackId}
+                                    muted
+                                    autoplay
+                                    max-live-delay="10"
+                                    min-live-delay="1"
+                                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                                    primary-color="#A828FF"
+                                />
+                            ) : (
+                                <div className="absolute inset-0 bg-zinc-800" />
+                            )}
+
+                            {/* Gradient overlay for text legibility */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+
+                            {/* LIVE badge */}
+                            <div className="absolute left-4 top-4">
+                                <span className="flex items-center gap-1.5 rounded bg-[#FF0000] px-2 py-0.5 text-[10px] font-bold tracking-wider text-white shadow-[0_0_10px_rgba(255,0,0,0.4)] animate-pulse">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                                    LIVE
+                                </span>
+                            </div>
+
+                            {/* Bottom metadata */}
+                            <div className="absolute bottom-0 left-0 w-full p-4">
+                                <div className="flex items-start gap-4">
+                                    <div className="h-10 w-10 rounded-full bg-black flex items-center justify-center shrink-0 border border-white/10 overflow-hidden">
+                                        <img src="/dgclivelogo.png" alt="DGC Logo" className="w-full h-full object-contain p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-white text-lg md:text-xl line-clamp-1">{liveStream.title}</h3>
+                                        <p className="mt-1 text-sm text-white/70">Davidic Generation Church</p>
+                                        <div className="mt-1 flex items-center gap-3 text-xs text-white/40">
+                                            <span>Join the live broadcast</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Play button hover */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-purple/90 text-white shadow-lg backdrop-blur-sm transform scale-90 group-hover:scale-100 transition-transform">
+                                    <Play className="h-5 w-5 fill-current" />
+                                </div>
+                            </div>
+                        </Link>
+                    </div>
+                </section>
+            ) : (
+                <section>
+                    <h2 className="text-2xl font-bold text-white mb-6">Welcome to Davidic Generation Church</h2>
+                    <p className="text-white/60 mb-8 max-w-2xl">We don't have a live broadcast right now. Please explore our recent sermons below or view our upcoming scheduled services!</p>
+                </section>
+            )}
 
             {/* 2. UPCOMING SERVICES */}
             <section>
@@ -131,7 +226,7 @@ export function MemberDashboard() {
                         const times = ["Mon, 6:00 PM", "Wed, 7:00 PM", "Fri, 6:00 PM", "Sat, 10:00 AM", "Sun, 9:30 AM"]
                         const randomTime = times[Math.floor(Math.random() * times.length)]
                         const randomWaiting = Math.floor(Math.random() * 200) + 10
-                        
+
                         return (
                             <SmallEventCard
                                 key={video.id}
@@ -141,6 +236,7 @@ export function MemberDashboard() {
                                 churchName={video.channelTitle || "Davidic Generation Church"}
                                 waitingCount={randomWaiting}
                                 thumbnail={video.thumbnailUrl}
+                                muxPlaybackId={video.muxPlaybackId}
                             />
                         )
                     })}
@@ -177,6 +273,7 @@ export function MemberDashboard() {
                                         church={viewText}
                                         date={formatDate(video.publishedAt)}
                                         thumbnail={video.thumbnailUrl}
+                                        muxPlaybackId={video.muxPlaybackId}
                                         source={video.source}
                                         href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
                                     />

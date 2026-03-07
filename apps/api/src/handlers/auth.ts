@@ -119,7 +119,10 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
     if (authError) {
       console.error('Supabase auth error:', authError);
-      res.status(400).json({ error: authError.message || "Failed to create user" });
+      res.status(400).json({
+        error: authError.message || "Failed to create user",
+        code: (authError as any).code // Pass the code (e.g., 'email_exists') to the frontend
+      });
       return;
     }
 
@@ -129,7 +132,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
     }
 
     // 4. Create profile in database and mark verification code as used
-    const newProfile = await prisma.$transaction(async (tx) => {
+    const newProfile = await prisma.$transaction(async (tx: { verificationCode: { update: (arg0: { where: { id: any; }; data: { used: boolean; }; }) => any; }; profile: { create: (arg0: { data: { id: string; email: any; fullName: any; }; }) => any; }; }) => {
       // Mark verification code as used
       await tx.verificationCode.update({
         where: { id: verificationRecord.id },
@@ -146,9 +149,27 @@ export const verifyEmail = async (req: Request, res: Response) => {
       });
     });
 
+    // 5. Auto-login to generate tokens
+    const { data: sessionData, error: sessionError } = await supabaseAdmin.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (sessionError || !sessionData.session) {
+      console.error("Auto-login failed:", sessionError);
+      // Fallback: User created but must sign in manually
+      res.status(201).json({
+        message: "Account created successfully! Please sign in.",
+        user: newProfile
+      });
+      return;
+    }
+
     res.status(201).json({
       message: "Account created successfully!",
       user: newProfile,
+      token: sessionData.session.access_token,
+      refreshToken: sessionData.session.refresh_token,
     });
 
   } catch (error: any) {
