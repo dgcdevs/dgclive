@@ -16,7 +16,14 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
 
 		// 1. Verify Token with Supabase
 		const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-		if (error || !user) return res.status(401).json({ error: "Invalid Token" });
+		if (error) {
+			console.error("Supabase Auth Error:", error);
+			return res.status(401).json({ error: "Invalid Token", details: error.message });
+		}
+		if (!user) {
+			console.error("Supabase Auth Error: No user returned");
+			return res.status(401).json({ error: "Invalid Token", details: "No user returned" });
+		}
 
 		// 2. Get Profile
 		const profile = await prisma.profile.findUnique({ where: { id: user.id } });

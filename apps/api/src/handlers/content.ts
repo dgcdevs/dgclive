@@ -1,13 +1,14 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { AuthRequest } from '../middleware/requireAuth';
 
 // Phase 4: Worship (Get the current live stream)
-export const getLiveStream = async (req: Request, res: Response) => {
+export const getLiveStream = async (req: AuthRequest, res: Response) => {
   try {
     // Find the FIRST event that is currently marked as "isLive"
     const liveEvent = await prisma.event.findFirst({
       where: { isLive: true },
-      include: { 
+      include: {
         _count: { select: { chatMessages: true } } // Optional: Tell user how active chat is
       }
     });
@@ -17,13 +18,16 @@ export const getLiveStream = async (req: Request, res: Response) => {
       return;
     }
 
+    const isAdminOrMedia = req.user?.role === 'ADMIN' || req.user?.role === 'MEDIA';
+
     // Return only what the Member needs to watch
     res.json({
       id: liveEvent.id,
       title: liveEvent.title,
       playbackId: liveEvent.muxPlaybackId, // <--- The key for the Video Player
       startTime: liveEvent.startTime,
-      isLive: true
+      isLive: true,
+      streamKey: isAdminOrMedia ? liveEvent.muxStreamKey : undefined, // <--- SECRET KEY FOR OBS
     });
 
   } catch (error) {
@@ -32,7 +36,7 @@ export const getLiveStream = async (req: Request, res: Response) => {
 };
 
 // Phase 6: Reflection (Get past sermons)
-export const getArchives = async (req: Request, res: Response) => {
+export const getArchives = async (req: AuthRequest, res: Response) => {
   try {
     const source = typeof req.query.source === 'string' ? req.query.source : 'all';
     const take = Number(req.query.take || 20);
@@ -43,20 +47,20 @@ export const getArchives = async (req: Request, res: Response) => {
     const [muxArchives, youtubeArchives] = await Promise.all([
       shouldIncludeMux
         ? prisma.event.findMany({
-            where: {
-              isLive: false,
-              isPublic: true,
-              muxAssetId: { not: null }
-            },
-            orderBy: { startTime: 'desc' },
-            take
-          })
+          where: {
+            isLive: false,
+            isPublic: true,
+            muxAssetId: { not: null }
+          },
+          orderBy: { startTime: 'desc' },
+          take
+        })
         : Promise.resolve([]),
       shouldIncludeYouTube
         ? prisma.youTubeVideo.findMany({
-            orderBy: { publishedAt: 'desc' },
-            take
-          })
+          orderBy: { publishedAt: 'desc' },
+          take
+        })
         : Promise.resolve([])
     ]);
 

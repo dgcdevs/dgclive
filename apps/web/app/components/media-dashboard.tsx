@@ -13,7 +13,7 @@ export function MediaDashboard() {
                     <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Davidic Generation Church</h1>
                     <p className="text-white/50 mt-1">Manage your live streams and viewing experience</p>
                 </div>
-                <Link href="/dashboard/create" className="flex items-center gap-2 bg-[#A828FF] hover:bg-[#9222de] text-white px-6 py-3 rounded-lg font-bold transition-all shadow-[0_0_20px_rgba(168,40,255,0.3)] hover:shadow-[0_0_30px_rgba(168,40,255,0.5)]">
+                <Link href="/create" className="flex items-center gap-2 bg-[#A828FF] hover:bg-[#9222de] text-white px-6 py-3 rounded-lg font-bold transition-all shadow-[0_0_20px_rgba(168,40,255,0.3)] hover:shadow-[0_0_30px_rgba(168,40,255,0.5)]">
                     <Radio className="h-4 w-4" />
                     Go Live
                 </Link>
@@ -54,7 +54,7 @@ export function MediaDashboard() {
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h2 className="text-lg font-bold">Recent Streams</h2>
-                        <Link href="/dashboard/analytics" className="text-xs font-medium bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-white/70 transition-colors">
+                        <Link href="/analytics" className="text-xs font-medium bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-white/70 transition-colors">
                             View Analytics
                         </Link>
                     </div>
@@ -88,7 +88,7 @@ export function MediaDashboard() {
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h2 className="text-lg font-bold">Scheduled Services</h2>
-                        <Link href="/dashboard/create" className="text-xs font-medium bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-white/70 transition-colors">
+                        <Link href="/create" className="text-xs font-medium bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-white/70 transition-colors">
                             Schedule New
                         </Link>
                     </div>

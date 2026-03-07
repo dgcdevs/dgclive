@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma';
 // PHASE 2 & 3: SETUP & HANDSHAKE (Start Broadcast)
 export const startStream = async (req: Request, res: Response) => {
     try {
-        const { title, description, isPublic } = req.body;
+        const { title, description, isPublic, thumbnailUrl, scheduledStartTime } = req.body;
 
         // 1. Validate Input
         if (!title) {
@@ -13,23 +13,41 @@ export const startStream = async (req: Request, res: Response) => {
             return;
         }
 
-        // 2. Call Mux to create the "Signal"
-        const liveStream = await mux.video.liveStreams.create({
-            playback_policy: ['public'],
-            new_asset_settings: { playback_policy: ['public'] },
-            reconnect_window: 60, // Phase 4: Resilience (60s buffer for bad internet)
-        });
+        let liveStream: any;
+
+        try {
+            // 2. Call Mux to create the "Signal"
+            liveStream = await mux.video.liveStreams.create({
+                playback_policy: ['public'],
+                new_asset_settings: { playback_policy: ['public'] },
+                reconnect_window: 60, // Phase 4: Resilience (60s buffer for bad internet)
+            });
+        } catch (e: any) {
+            console.error("Mux Error:", e);
+            // Fallback for "Free Plan" error or other Mux issues during dev
+            if (e?.body?.error?.type === 'invalid_parameters' || e?.message?.includes('free plan')) {
+                console.log("⚠️ Using Mock Stream for Dev (Mux Free Plan Limit Reached)");
+                liveStream = {
+                    playback_ids: [{ id: "mock-playback-id" }],
+                    stream_key: "mock-stream-key-for-dev",
+                    id: "mock-stream-id"
+                };
+            } else {
+                throw e;
+            }
+        }
 
         // 3. Save "Event" to Database
         const newEvent = await prisma.event.create({
             data: {
                 title,
                 description,
-                startTime: new Date(),
+                startTime: scheduledStartTime ? new Date(scheduledStartTime) : new Date(),
                 isPublic: isPublic || false, // Private by default
                 isLive: true,
                 muxPlaybackId: liveStream.playback_ids?.[0]?.id,
                 muxStreamKey: liveStream.stream_key, // <--- THE SECRET WEAPON (Only sent to Media/Admin)
+                thumbnailUrl, // <--- Save the uploaded image URL
             },
         });
 

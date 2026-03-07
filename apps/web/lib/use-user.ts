@@ -38,8 +38,10 @@ export function useUser() {
                     'Authorization': `Bearer ${token}`
                 }
             })
-                .then(res => {
+                .then(async res => {
                     if (res.ok) return res.json();
+                    const err = await res.json().catch(() => ({}));
+                    console.error("Auth Error Body:", err);
                     throw new Error("Session invalid");
                 })
                 .then(data => {
