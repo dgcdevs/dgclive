@@ -1,0 +1,20 @@
+name: Sync to Personal Repo
+
+on:
+  push:
+    branches:
+      - main  # or your default branch
+
+jobs:
+  repo-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Org Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Personal Repo
+        run: |
+          REMOTE_URL="https://x-access-token:${{ secrets.PERSONAL_REPO_TOKEN }}@github.com/kingigbozuruike/dgclive.git"
+          git push --force "$REMOTE_URL" main
