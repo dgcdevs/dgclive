@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { mux } from '../lib/mux';
 import { prisma } from '../lib/prisma';
+import { notifyAllMembers } from '../lib/notifications';
+import { io } from '../index';
 
 // PHASE 2 & 3: SETUP & HANDSHAKE (Start Broadcast)
 export const startStream = async (req: Request, res: Response) => {
@@ -54,6 +56,20 @@ export const startStream = async (req: Request, res: Response) => {
                 ...(thumbnailUrl && { thumbnailUrl }),
             },
         });
+
+        // Notify all members that a livestream has started
+        try {
+            await notifyAllMembers(
+                'LIVESTREAM_STARTED',
+                `${newEvent.title} is now live!`,
+                'Join the broadcast to watch.',
+                newEvent.id,
+                io
+            );
+        } catch (notifError) {
+            console.error('[Notifications] Failed to notify members of stream start:', notifError);
+            // Don't fail the entire request if notification fails
+        }
 
         // 4. Return the Keys to the Producer Dashboard
         res.status(201).json({

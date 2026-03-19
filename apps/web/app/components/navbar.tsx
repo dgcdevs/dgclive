@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Logo } from "./logo"
 import { Search, Bell, Calendar, User, Home, LayoutDashboard, Video, LogOut } from "lucide-react"
+import { NotificationDropdown } from "./notification-dropdown"
 
 import { useUser } from "../../lib/use-user"
 
@@ -107,12 +108,7 @@ export function Navbar() {
 
                     {/* User Actions */}
                     <div className="flex items-center gap-3">
-                        <button className="relative rounded-lg border border-white/10 bg-white/5 p-2 text-white/60 hover:text-white hover:bg-white/10 transition-colors">
-                            <Bell className="h-4 w-4" />
-                            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-brand-magenta text-[9px] font-bold text-white border border-brand-dark">
-                                2
-                            </span>
-                        </button>
+                        <NotificationDropdown />
 
                         <div className="relative">
                             <button

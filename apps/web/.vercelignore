@@ -1,0 +1,9 @@
+# Vercel should only deploy the web app
+apps/api
+packages
+supabase
+*.md
+.git
+.gitignore
+node_modules
+pnpm-lock.yaml

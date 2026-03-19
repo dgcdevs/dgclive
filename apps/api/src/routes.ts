@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, requireMediaOrAdmin } from './middleware/req
 import { banUser, getUsers, getInvites, updateUserRole, syncYouTubeVideos, setupMasterStream } from './handlers/admin';
 import { getLiveStream, getArchives, getVideoById } from './handlers/content';
 import { sendMessage, getMessages } from './handlers/chat';
+import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './handlers/notifications';
 
 const router = Router();
 
@@ -31,6 +32,11 @@ router.get('/stream/:id', requireAuth, getVideoById);
 router.post('/chat', requireAuth, sendMessage);
 router.get('/chat/:eventId', requireAuth, getMessages);
 router.get('/archive', requireAuth, getArchives);
+
+// Notifications
+router.get('/notifications', requireAuth, getNotifications);
+router.patch('/notifications/:notificationId/read', requireAuth, markNotificationAsRead);
+router.patch('/notifications/read-all', requireAuth, markAllNotificationsAsRead);
 
 // ==========================================
 // ADMIN / MEDIA ONLY (The Control Room)

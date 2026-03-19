@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma';
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { fetchChannelVideos } from '../lib/youtube';
 import { mux } from '../lib/mux';
+import { createNotification } from '../lib/notifications';
+import { io } from '../index';
 
 // Phase 4: Discipline (Ban User)
 export const banUser = async (req: Request, res: Response) => {
@@ -171,6 +173,27 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
                     updated += 1;
                 } else {
                     added += 1;
+                    // Notify all members about the new video
+                    try {
+                        // Get all users to notify
+                        const allUsers = await prisma.profile.findMany({
+                            select: { id: true }
+                        });
+                        
+                        for (const user of allUsers) {
+                            await createNotification(
+                                user.id,
+                                'NEW_VIDEO',
+                                `New sermon: ${video.title}`,
+                                'Watch the latest teaching from our channel.',
+                                video.youtubeId,
+                                io
+                            );
+                        }
+                    } catch (notifError) {
+                        console.error('[Notifications] Failed to notify members of new video:', notifError);
+                        // Don't fail the sync if notifications fail
+                    }
                 }
             }
 

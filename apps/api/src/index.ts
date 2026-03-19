@@ -10,7 +10,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
 	cors: {
-		origin: ['http://localhost:3000', 'http://192.168.56.1:3000'],
+		origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
 		credentials: true,
 	},
 	transports: ['websocket', 'polling'],
@@ -18,7 +18,7 @@ const io = new SocketIOServer(httpServer, {
 
 // 1. Security & Configuration
 app.use(cors({
-	origin: ['http://localhost:3000', 'http://192.168.56.1:3000'], // Allow frontend on localhost and network IP
+	origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
 	credentials: true // Allow cookies/headers if needed
 }));
 app.use(express.json());
@@ -49,6 +49,14 @@ io.on("connection", (socket) => {
 		socket.join(roomName);
 	});
 
+	// Auto-join user to notifications room if they provide userId
+	socket.on("join-notifications", (userId: string) => {
+		if (userId) {
+			socket.join(`notifications-${userId}`);
+			console.log(`[Socket.io] ${socket.id} joined notifications room for user: ${userId}`);
+		}
+	});
+
 	// Broadcast to a specific room
 	socket.on("message", (roomName: string, message: any) => {
 		io.to(roomName).emit("message", message);
@@ -65,3 +73,6 @@ httpServer.listen(port, () => {
 	console.log(`🚀 API running on http://localhost:${port}`);
 	console.log(`📡 Socket.io ready at http://localhost:${port}/socket.io/`);
 });
+
+// Export io for use in handlers
+export { io };
