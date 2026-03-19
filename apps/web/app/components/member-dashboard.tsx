@@ -4,6 +4,7 @@ import { Play, Calendar, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { io as socketIO } from "socket.io-client"
+import MuxPlayer from "@mux/mux-player-react"
 import { VideoCard } from "./video-card"
 import { SmallEventCard } from "./small-event-card"
 import { NewsletterBanner } from "./newsletter-banner"
@@ -159,15 +160,14 @@ export function MemberDashboard() {
                         >
                             {/* Live MuxPlayer preview — muted autoplay */}
                             {liveStream.playbackId ? (
-                                <mux-player
-                                    stream-type="ll-live"
-                                    playback-id={liveStream.playbackId}
+                                <MuxPlayer
+                                    streamType="ll-live"
+                                    playbackId={liveStream.playbackId}
                                     muted
-                                    autoplay
-                                    max-live-delay="10"
-                                    min-live-delay="1"
+                                    autoPlay="any"
                                     style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                                    primary-color="#A828FF"
+                                    accentColor="#A828FF"
+                                    primaryColor="#A828FF"
                                 />
                             ) : (
                                 <div className="absolute inset-0 bg-zinc-800" />
@@ -236,7 +236,6 @@ export function MemberDashboard() {
                                 churchName={video.channelTitle || "Davidic Generation Church"}
                                 waitingCount={randomWaiting}
                                 thumbnail={video.thumbnailUrl}
-                                muxPlaybackId={video.muxPlaybackId}
                             />
                         )
                     })}
@@ -273,7 +272,6 @@ export function MemberDashboard() {
                                         church={viewText}
                                         date={formatDate(video.publishedAt)}
                                         thumbnail={video.thumbnailUrl}
-                                        muxPlaybackId={video.muxPlaybackId}
                                         source={video.source}
                                         href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
                                     />

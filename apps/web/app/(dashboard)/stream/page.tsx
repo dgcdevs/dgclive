@@ -61,6 +61,7 @@ export default function ControlRoomPage() {
     // Live event state (populated by webhook via socket when OBS connects)
     const [playbackId, setPlaybackId] = useState<string | null>(null)
     const [eventId, setEventId] = useState<string | null>(null)
+    const [eventStreamKey, setEventStreamKey] = useState<string | null>(null)
     const [isLive, setIsLive] = useState(false)
     const [isPublished, setIsPublished] = useState(false)
     const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
@@ -82,8 +83,40 @@ export default function ControlRoomPage() {
     const [showDiagnosticModal, setShowDiagnosticModal] = useState(false)
     const [activeSidebarTab, setActiveSidebarTab] = useState<'chat' | 'health' | 'stats' | 'controls'>('chat')
     const [isConfigExpanded, setIsConfigExpanded] = useState(false)
+    const [encoderConnected, setEncoderConnected] = useState(false)
+    const [checkingEncoderStatus, setCheckingEncoderStatus] = useState(false)
 
     const socketRef = useRef<Socket | null>(null)
+    const isFetchingLiveStatusRef = useRef(false)
+    const isFetchingConfigRef = useRef(false)
+    const lastLiveStatusFetchRef = useRef<number>(0)
+    const lastConfigFetchRef = useRef<number>(0)
+    const encoderStatusIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+    // ---------------------------------------------------------------
+    // Helper: Check if encoder is actually connected to Mux
+    // ---------------------------------------------------------------
+    const checkEncoderStatus = useRef(() => {
+        if (!eventId || checkingEncoderStatus) return;
+
+        setCheckingEncoderStatus(true);
+        const token = localStorage.getItem('token');
+        
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/status?eventId=${eventId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+            .then(res => res.json())
+            .then(data => {
+                setEncoderConnected(data.isConnected || false);
+                // Update obsStatus to 'live' when encoder is detected
+                if (data.isConnected) {
+                    setObsStatus('live');
+                }
+                console.log('[Encoder Status]', data);
+            })
+            .catch(err => console.error('[Encoder Status] Error:', err))
+            .finally(() => setCheckingEncoderStatus(false));
+    });
 
     // ---------------------------------------------------------------
     // Helper: Join the event's socket room once we know the eventId
@@ -104,17 +137,27 @@ export default function ControlRoomPage() {
             })
 
             const data = await res.json()
+            console.log('[Master Stream] Response:', { status: res.status, ok: res.ok, data })
+            
             if (res.ok) {
+                console.log('[Master Stream] Setting state:', { 
+                    masterStreamKey: data.masterStreamKey, 
+                    masterPlaybackId: data.masterPlaybackId,
+                    srtPassphrase: data.srtPassphrase 
+                })
                 setMasterStreamKey(data.masterStreamKey)
                 setMasterPlaybackId(data.masterPlaybackId)
                 if (data.srtPassphrase) setSrtPassphrase(data.srtPassphrase)
+                console.log('[Master Stream] About to set needsConfig to false')
                 setNeedsConfig(false)
+                console.log('[Master Stream] needsConfig set to false')
                 showToast("Master Stream Key successfully generated!", "success")
             } else {
+                console.error('[Master Stream] Error response:', data)
                 showToast(data.error || "Failed to generate master stream key", "error")
             }
         } catch (error) {
-            console.error(error)
+            console.error('[Master Stream] Catch error:', error)
             showToast("Error generating master stream key", "error")
         } finally {
             setIsGeneratingKey(false)
@@ -123,8 +166,25 @@ export default function ControlRoomPage() {
 
     // 2. Fetcher for live stream status
     const loadLiveStatus = useRef(() => {
+        // Prevent concurrent requests - skip if already fetching
+        if (isFetchingLiveStatusRef.current) {
+            console.log('[Live Status] Already fetching, skipping...')
+            return
+        }
+
+        // Rate limit: don't fetch more than once per 2 seconds
+        const now = Date.now()
+        if (now - lastLiveStatusFetchRef.current < 2000) {
+            console.log('[Live Status] Rate limited, skipping...')
+            return
+        }
+
+        isFetchingLiveStatusRef.current = true
+        lastLiveStatusFetchRef.current = now
+
         const token = localStorage.getItem('token')
         const headers = { 'Authorization': `Bearer ${token}` }
+        
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
             .then(async res => {
                 const data = await res.json();
@@ -147,14 +207,18 @@ export default function ControlRoomPage() {
                     setObsStatus(data.isLive ? 'live' : 'offline');
                 }
                 if (data.playbackId) setPlaybackId(data.playbackId);
+                if (data.muxStreamKey) setEventStreamKey(data.muxStreamKey); // Sync event stream key from backend
                 if (data.thumbnailUrl) setThumbnailUrl(data.thumbnailUrl);
                 if (data.streamStartedAt) setStreamStartedAt(data.streamStartedAt);
                 if (data.chatEnabled !== undefined) setChatEnabled(data.chatEnabled);
                 if (data.slowMode !== undefined) setSlowMode(data.slowMode);
             })
             .catch(err => {
-                console.error(err);
+                console.error('[Live Status] Error:', err);
                 setStreamError({ message: "Failed to connect to the server. Please check your internet.", code: "FETCH_ERROR" });
+            })
+            .finally(() => {
+                isFetchingLiveStatusRef.current = false
             });
     });
 
@@ -169,34 +233,64 @@ export default function ControlRoomPage() {
         const token = localStorage.getItem('token')
         const headers = { 'Authorization': `Bearer ${token}` }
 
-        // 1. Fetch static master OBS config (stream key + RTMP URL)
-        setIsLoadingConfig(true)
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/config`, { headers })
+        // Fetch current stream's muxStreamKey immediately on mount
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
             .then(res => {
-                if (res.status === 404) {
-                    setNeedsConfig(true)
-                    return null
-                }
+                if (!res.ok) return null
                 return res.json()
             })
             .then(data => {
-                if (!data) {
-                    setIsLoadingConfig(false)
-                    return
+                if (data?.muxStreamKey) {
+                    setEventStreamKey(data.muxStreamKey) // Always use current stream's key
                 }
-                if (data.masterStreamKey) setMasterStreamKey(data.masterStreamKey)
-                if (data.masterPlaybackId) setMasterPlaybackId(data.masterPlaybackId)
-                if (data.srtPassphrase) setSrtPassphrase(data.srtPassphrase)
-                setNeedsConfig(false)
-                setIsLoadingConfig(false)
             })
-            .catch(err => {
-                console.error(err)
-                setIsLoadingConfig(false)
-            })
+            .catch(err => console.error('[Fetch Stream Key] Error:', err))
+
+        // 1. Fetch static master OBS config (stream key + RTMP URL)
+        // Skip if already fetching or if too recent
+        if (isFetchingConfigRef.current || (Date.now() - lastConfigFetchRef.current) < 2000) {
+            console.log('[Config] Already fetching or rate limited, skipping...')
+        } else {
+            setIsLoadingConfig(true)
+            isFetchingConfigRef.current = true
+            lastConfigFetchRef.current = Date.now()
+            
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/config`, { headers })
+                .then(res => {
+                    if (res.status === 404) {
+                        setNeedsConfig(true)
+                        return null
+                    }
+                    return res.json()
+                })
+                .then(data => {
+                    if (!data) {
+                        setIsLoadingConfig(false)
+                        return
+                    }
+                    if (data.masterStreamKey) setMasterStreamKey(data.masterStreamKey)
+                    if (data.masterPlaybackId) setMasterPlaybackId(data.masterPlaybackId)
+                    if (data.srtPassphrase) setSrtPassphrase(data.srtPassphrase)
+                    setNeedsConfig(false)
+                    setIsLoadingConfig(false)
+                })
+                .catch(err => {
+                    console.error('[Config] Error:', err)
+                    setIsLoadingConfig(false)
+                })
+                .finally(() => {
+                    isFetchingConfigRef.current = false
+                })
+        }
 
         // Initial load
         loadLiveStatus.current();
+
+    }, [hasRole, loading, router])
+
+    // Socket.io Setup — ONLY RUN ONCE on mount, never reconnect
+    useEffect(() => {
+        if (!hasRole(["MEDIA", "ADMIN"])) return
 
         // 3. Set up Socket.io
         if (!socketRef.current) {
@@ -226,6 +320,7 @@ export default function ControlRoomPage() {
                 setIsLive(false);
                 setIsPublished(false);
                 setObsStatus('offline');
+                setEventStreamKey(null); // Clear event stream key when stream ends
             });
 
             // Generic status changes (publish, unpublish, etc.)
@@ -267,7 +362,7 @@ export default function ControlRoomPage() {
                 socketRef.current = null;
             }
         };
-    }, [hasRole, loading, router])
+    }, [])
 
     // --- PROACTIVE POLLING: If not live, check every 10s back against the synced server ---
     useEffect(() => {
@@ -282,6 +377,8 @@ export default function ControlRoomPage() {
     }, [obsStatus]);
 
     // Poll engagement stats while the event is active
+    // TODO: Implement /stream/:id/stats endpoint on backend
+    /*
     useEffect(() => {
         if (!eventId) return;
 
@@ -305,6 +402,7 @@ export default function ControlRoomPage() {
         const interval = setInterval(fetchStats, 10000);
         return () => clearInterval(interval);
     }, [eventId]);
+    */
 
     // Auto-trigger diagnostic modal if a critical error is detected
     useEffect(() => {
@@ -346,6 +444,11 @@ export default function ControlRoomPage() {
         if (!confirm("Are you sure you want to end the live stream?")) return
 
         try {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+            setObsStatus('offline') // Resume polling
             const token = localStorage.getItem('token')
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/stop`, {
                 method: 'POST',
@@ -354,6 +457,7 @@ export default function ControlRoomPage() {
             })
 
             if (res.ok) {
+                setEventStreamKey(null) // Clear event stream key when stream ends
                 router.push("/dashboard")
             } else {
                 const data = await res.json()
@@ -362,6 +466,44 @@ export default function ControlRoomPage() {
         } catch (error) {
             console.error(error)
             showToast("Error ending stream", "error")
+        }
+    }
+
+    const handleStartStreamEvent = async () => {
+        try {
+            setIsLoadingConfig(true)
+            const token = localStorage.getItem('token')
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ title: 'Live Stream', description: '', isPublic: false })
+            })
+
+            const data = await res.json()
+            if (res.ok) {
+                console.log('[Start Stream Event] Created:', { eventId: data.eventId, playbackId: data.playbackId, streamKey: data.streamKey })
+                setEventId(data.eventId)
+                setPlaybackId(data.playbackId)
+                setEventStreamKey(data.streamKey) // Capture the event-specific stream key
+                setIsLive(true)
+                setObsStatus('connecting') // Stop polling loop until encoder is detected
+                setEncoderConnected(false)
+                showToast("Stream event created! Start streaming now from OBS/ffmpeg.", "success")
+                
+                // Start polling for encoder connection (check every 3 seconds)
+                if (encoderStatusIntervalRef.current) clearInterval(encoderStatusIntervalRef.current);
+                checkEncoderStatus.current();
+                encoderStatusIntervalRef.current = setInterval(() => {
+                    checkEncoderStatus.current();
+                }, 3000);
+            } else {
+                showToast(data.error || "Failed to create stream event", "error")
+            }
+        } catch (err) {
+            console.error('[Start Stream Event] Error:', err)
+            showToast("Error creating stream event", "error")
+        } finally {
+            setIsLoadingConfig(false)
         }
     }
 
@@ -420,8 +562,9 @@ export default function ControlRoomPage() {
         setTimeout(() => setCopied(false), 2000)
     }
 
-    // Use masterPlaybackId as the fallback while no event is active but config is loaded
-    const activePlaybackId = playbackId ?? masterPlaybackId;
+    // Only use actual event playbackId — NEVER use masterPlaybackId for playback
+    // Master stream is for OBS ingest only, not for display
+    const activePlaybackId = playbackId || null;
 
     if (loading) return null
     if (!hasRole(["MEDIA", "ADMIN"])) return null
@@ -620,13 +763,37 @@ export default function ControlRoomPage() {
 
                     {/* OBS Configuration — always visible, credentials never change */}
                     <ObsConfigCard
-                        masterStreamKey={masterStreamKey}
+                        masterStreamKey={eventStreamKey || masterStreamKey}
                         masterPlaybackId={masterPlaybackId}
                         srtPassphrase={srtPassphrase}
                         isLoadingConfig={isLoadingConfig}
                         isGeneratingKey={isGeneratingKey}
                         onGenerate={handleGenerateMasterKey}
                     />
+
+                    {/* Start Stream Event Button — shown after key is generated */}
+                    {masterStreamKey && !isLive && (
+                        <div className="mt-6 p-6 bg-gradient-to-br from-brand-purple/10 to-brand-purple/5 border border-brand-purple/20 rounded-2xl space-y-4">
+                            <div className="space-y-2">
+                                <h3 className="text-sm font-bold text-white">Ready to Stream?</h3>
+                                <p className="text-xs text-white/60 leading-relaxed">
+                                    Your OBS credentials are ready. To start streaming, you need to:
+                                </p>
+                                <ol className="text-xs text-white/50 space-y-1.5 list-decimal list-inside">
+                                    <li>Click the button below to create a stream event</li>
+                                    <li>Start streaming from your encoder (OBS/ffmpeg)</li>
+                                    <li>The preview will appear once we detect your stream</li>
+                                </ol>
+                            </div>
+                            <button
+                                onClick={handleStartStreamEvent}
+                                disabled={isLoadingConfig}
+                                className="w-full bg-brand-purple hover:bg-brand-purple/80 disabled:opacity-60 text-white font-bold py-3 px-4 rounded-lg transition-all text-sm"
+                            >
+                                {isLoadingConfig ? "Creating Stream Event..." : "Start Stream Event"}
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Sidebar — Tabbed and Organized */}
@@ -656,7 +823,7 @@ export default function ControlRoomPage() {
                     <div className="flex-1 overflow-hidden flex flex-col">
                         {activeSidebarTab === 'chat' && (
                             <div className="flex-1 flex flex-col min-h-0 bg-black/10">
-                                <LiveChat eventId={eventId || undefined} />
+                                <LiveChat />
                             </div>
                         )}
 
@@ -922,6 +1089,7 @@ function ObsConfigCard({
         ? `srt://global-live.mux.com:6001?streamid=${masterStreamKey}&passphrase=${srtPassphrase}`
         : null
     const rtmpUrl = 'rtmp://global-live.mux.com:5222/app'
+    const ffmpegRtmpUrl = masterStreamKey ? `${rtmpUrl}/${masterStreamKey}` : null
 
     const hasCredentials = Boolean(masterStreamKey)
 
@@ -995,6 +1163,17 @@ function ObsConfigCard({
                                 />
                             )}
                         </div>
+
+                        {/* FFmpeg Combined URL */}
+                        {ffmpegRtmpUrl && (
+                            <CredentialRow
+                                label="FFmpeg RTMP URL (Combined)"
+                                value={showKey ? ffmpegRtmpUrl : 'rtmp://global-live.mux.com:5222/app/••••••••••••••••••••••••'}
+                                onCopy={() => copy(ffmpegRtmpUrl, 'rtmp')}
+                                isCopied={copiedField === 'rtmp'}
+                                hint="Use this for ffmpeg: ffmpeg ... -f flv [this URL]"
+                            />
+                        )}
                     </div>
                 )}
             </div>

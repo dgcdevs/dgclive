@@ -58,7 +58,7 @@ export function VideoPlayer({
                             className="absolute inset-0 z-10"
                         >
                             <MuxPlayer
-                                streamType="ll-live"
+                                streamType={streamType}
                                 playbackId={muxPlaybackId}
                                 autoPlay="any"
                                 accentColor="#A828FF"

@@ -50,6 +50,7 @@ model Event {
   startTime   DateTime
   isPublic    Boolean  @default(false) // If false, only Members can watch
   isLive      Boolean  @default(false)
+  isPublished Boolean  @default(false) // Published to members/public (separate from isLive)
 
   // --- MUX VIDEO DATA (Critical Addition) ---
   muxPlaybackId String? // For the Frontend Player

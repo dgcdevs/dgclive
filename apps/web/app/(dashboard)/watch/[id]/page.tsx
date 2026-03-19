@@ -10,7 +10,7 @@ import { useEffect, useState, useRef } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import LogoImage from "@/assets/images/dgclivelogo.png"
-import { useAuth } from "../../../../hooks/useAuth"
+import { useAuth } from "@/lib/useAuth"
 import { io, Socket } from "socket.io-client"
 
 type ReactionType = "LIKE" | "PRAISE" | "FIRE" | "PRAYING"
@@ -285,10 +285,7 @@ export default function WatchPage() {
 
             {/* Right Column: Live Chat & Comments */}
             <div className="lg:col-span-1 h-[calc(100vh-120px)] sticky top-24">
-                <LiveChat
-                    eventId={source === "mux" ? video.id : undefined}
-                    youtubeVideoId={source === "youtube" ? video.youtubeId : undefined}
-                />
+                <LiveChat />
             </div>
         </div>
     )

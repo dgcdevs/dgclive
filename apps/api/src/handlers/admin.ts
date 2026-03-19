@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { fetchChannelVideos } from '../lib/youtube';
+import { mux } from '../lib/mux';
 
 // Phase 4: Discipline (Ban User)
 export const banUser = async (req: Request, res: Response) => {
@@ -185,5 +186,68 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
     } catch (error) {
         console.error("Failed to sync YouTube videos", error);
         res.status(500).json({ error: "Failed to sync YouTube videos" });
+    }
+};
+
+// Setup Master Live Stream (Admin Only)
+// Creates or retrieves the master Mux livestream for OBS configuration
+export const setupMasterStream = async (req: Request, res: Response) => {
+    try {
+        // Check if master stream already exists (we store it as a special event with title "MASTER_STREAM")
+        let masterStream = await prisma.event.findFirst({
+            where: { title: "MASTER_STREAM" }
+        });
+
+        // If it doesn't exist, create a new one via Mux
+        if (!masterStream) {
+            let liveStream: any;
+            try {
+                liveStream = await mux.video.liveStreams.create({
+                    playback_policy: ['public'],
+                    new_asset_settings: { playback_policy: ['public'] },
+                    reconnect_window: 60,
+                });
+            } catch (e: any) {
+                console.error("Mux Error:", e);
+                // Fallback for dev/free plan
+                if (e?.body?.error?.type === 'invalid_parameters' || e?.message?.includes('free plan')) {
+                    console.log("⚠️ Using Mock Master Stream for Dev (Mux Free Plan Limit Reached)");
+                    liveStream = {
+                        playback_ids: [{ id: "mock-master-playback-id" }],
+                        stream_keys: [{ key: "mock-master-stream-key-for-dev" }],
+                        id: "mock-master-stream-id"
+                    };
+                } else {
+                    throw e;
+                }
+            }
+
+            // Store master stream in database
+            // Extract the actual stream key from the Mux response
+            const streamKey = liveStream.stream_keys?.[0]?.key || liveStream.stream_key;
+            const playbackId = liveStream.playback_ids?.[0]?.id;
+
+            masterStream = await prisma.event.create({
+                data: {
+                    title: "MASTER_STREAM",
+                    description: "Master livestream configuration for OBS",
+                    startTime: new Date(),
+                    isPublic: true,
+                    isLive: true,
+                    muxPlaybackId: playbackId,
+                    muxStreamKey: streamKey,
+                }
+            });
+        }
+
+        // Return the master stream credentials
+        res.json({
+            masterStreamKey: masterStream.muxStreamKey,
+            masterPlaybackId: masterStream.muxPlaybackId,
+            srtPassphrase: process.env.SRT_PASSPHRASE || undefined
+        });
+    } catch (error) {
+        console.error("Failed to setup master stream", error);
+        res.status(500).json({ error: "Failed to setup master stream" });
     }
 };
