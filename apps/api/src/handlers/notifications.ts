@@ -14,8 +14,16 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50); // Max 50
-    const offset = parseInt(req.query.offset as string) || 0;
+    // Handle query params that can be string | string[]
+    const limitParam = Array.isArray(req.query.limit) 
+      ? req.query.limit[0] 
+      : (req.query.limit as string);
+    const offsetParam = Array.isArray(req.query.offset) 
+      ? req.query.offset[0] 
+      : (req.query.offset as string);
+
+    const limit = Math.min(parseInt(limitParam) || 10, 50); // Max 50
+    const offset = parseInt(offsetParam) || 0;
 
     // Fetch unread notifications, ordered by most recent first
     const notifications = await prisma.notification.findMany({
@@ -57,7 +65,9 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
 export const markNotificationAsRead = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    const { notificationId } = req.params;
+    const notificationId = Array.isArray(req.params.notificationId) 
+      ? req.params.notificationId[0] 
+      : req.params.notificationId;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
