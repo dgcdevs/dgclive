@@ -217,3 +217,6 @@ npx prisma migrate deploy
 - **Railway Docs**: https://docs.railway.app
 - **Supabase Docs**: https://supabase.com/docs
 - **Prisma Migration**: https://www.prisma.io/docs/orm/prisma-migrate/workflows/team-development
+
+
+this is just to try and debug.
