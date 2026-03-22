@@ -14,25 +14,15 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Safely extract string values from query params
-    const getLimitValue = (): string => {
-      const val = req.query.limit;
-      if (typeof val === 'string') return val;
-      if (Array.isArray(val)) return val[0] || '10';
-      return '10';
+    const getQueryString = (value: unknown, fallback: string): string => {
+      if (typeof value === 'string') return value;
+      if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+      return fallback;
     };
 
-    const getOffsetValue = (): string => {
-      const val = req.query.offset;
-      if (typeof val === 'string') return val;
-      if (Array.isArray(val)) return val[0] || '0';
-      return '0';
-    };
+    const limit = Math.min(parseInt(getQueryString(req.query.limit, '10'), 10) || 10, 50);
+    const offset = parseInt(getQueryString(req.query.offset, '0'), 10) || 0;
 
-    const limit = Math.min(parseInt(getLimitValue()) || 10, 50); // Max 50
-    const offset = parseInt(getOffsetValue()) || 0;
-
-    // Fetch unread notifications, ordered by most recent first
     const notifications = await prisma.notification.findMany({
       where: {
         userId,
@@ -45,7 +35,6 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
       skip: offset,
     });
 
-    // Get total unread count for badge
     const unreadCount = await prisma.notification.count({
       where: {
         userId,
