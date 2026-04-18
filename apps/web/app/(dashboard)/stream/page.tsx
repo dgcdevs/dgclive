@@ -6,6 +6,8 @@ import { Eye, EyeOff, Copy, Check, Clock, Video, MessageSquare, Heart, Settings,
 import { useUser } from "../../../lib/use-user"
 import { LiveChat } from "../../components/live-chat"
 import { Toast, useToast } from "../../components/ui/toast"
+import { LoadingSpinner } from "../../components/LoadingSpinner"
+import { InlineErrorMessage } from "../../components/InlineErrorMessage"
 import { io, Socket } from "socket.io-client"
 import MuxPlayer from "@mux/mux-player-react";
 
@@ -79,6 +81,7 @@ export default function ControlRoomPage() {
     const [reactions, setReactions] = useState<number>(0)
     const [isLoadingConfig, setIsLoadingConfig] = useState(true)
     const [streamError, setStreamError] = useState<{ message: string, code: string } | null>(null)
+    const [encoderError, setEncoderError] = useState<string | null>(null)
     const [socketConnected, setSocketConnected] = useState(false)
     const [showDiagnosticModal, setShowDiagnosticModal] = useState(false)
     const [activeSidebarTab, setActiveSidebarTab] = useState<'chat' | 'health' | 'stats' | 'controls'>('chat')
@@ -108,13 +111,17 @@ export default function ControlRoomPage() {
             .then(res => res.json())
             .then(data => {
                 setEncoderConnected(data.isConnected || false);
+                setEncoderError(null); // Clear error on successful check
                 // Update obsStatus to 'live' when encoder is detected
                 if (data.isConnected) {
                     setObsStatus('live');
                 }
                 console.log('[Encoder Status]', data);
             })
-            .catch(err => console.error('[Encoder Status] Error:', err))
+            .catch(err => {
+                console.error('[Encoder Status] Error:', err);
+                setEncoderError('Failed to check encoder status. Check your connection.');
+            })
             .finally(() => setCheckingEncoderStatus(false));
     });
 
@@ -677,8 +684,13 @@ export default function ControlRoomPage() {
                                     <Video className="h-10 w-10 text-white/30" />
                                 </div>
                                 <div>
-                                    <p className="text-white/80 font-semibold text-base">Waiting for Encoder Signal...</p>
+                                    <p className="text-white/80 font-semibold text-base">
+                                        {checkingEncoderStatus ? 'Checking Encoder Connection...' : 'Waiting for Encoder Signal...'}
+                                    </p>
                                     <p className="text-white/30 text-sm mt-1">When OBS starts streaming and Mux establishes a connection, this preview will activate automatically.</p>
+                                    {encoderError && (
+                                        <p className="text-red-400 text-xs mt-2 font-medium">{encoderError}</p>
+                                    )}
                                     <button
                                         onClick={() => setShowDiagnosticModal(true)}
                                         className="text-brand-purple hover:text-brand-purple/80 text-xs font-medium mt-2 underline underline-offset-4 decoration-current/30 hover:decoration-current"
@@ -687,10 +699,19 @@ export default function ControlRoomPage() {
                                     </button>
                                 </div>
                                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-800 border border-white/10">
-                                    <span className="h-2 w-2 rounded-full bg-white/20 animate-pulse" />
-                                    <span className="text-xs text-white/30 font-medium">
-                                        {obsStatus === 'connecting' ? 'CONNECTING TO MUX...' : socketConnected ? 'WAITING FOR OBS SIGNAL' : 'RECONNECTING TO SERVER...'}
-                                    </span>
+                                    {checkingEncoderStatus ? (
+                                        <>
+                                            <span className="h-2 w-2 rounded-full bg-yellow-400 animate-spin" />
+                                            <span className="text-xs text-yellow-300 font-medium">CHECKING ENCODER STATUS...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="h-2 w-2 rounded-full bg-white/20 animate-pulse" />
+                                            <span className="text-xs text-white/30 font-medium">
+                                                {obsStatus === 'connecting' ? 'CONNECTING TO MUX...' : socketConnected ? 'WAITING FOR OBS SIGNAL' : 'RECONNECTING TO SERVER...'}
+                                            </span>
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
@@ -743,8 +764,17 @@ export default function ControlRoomPage() {
                                             disabled={isPublishing}
                                             className="flex items-center gap-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-[0_0_30px_rgba(239,68,68,0.5)] hover:shadow-[0_0_40px_rgba(239,68,68,0.7)] transition-all animate-pulse hover:animate-none"
                                         >
-                                            <span className="h-2.5 w-2.5 rounded-full bg-white" />
-                                            {isPublishing ? "Publishing..." : "Go Live to Public"}
+                                            {isPublishing ? (
+                                                <>
+                                                    <LoadingSpinner size="sm" />
+                                                    Publishing...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="h-2.5 w-2.5 rounded-full bg-white" />
+                                                    Go Live to Public
+                                                </>
+                                            )}
                                         </button>
                                     ) : (
                                         <button
@@ -752,8 +782,17 @@ export default function ControlRoomPage() {
                                             disabled={isPublishing}
                                             className="flex items-center gap-2.5 bg-zinc-800 hover:bg-zinc-700 border border-white/20 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg"
                                         >
-                                            <span className="h-2.5 w-2.5 rounded-full bg-red-500 border border-red-200" />
-                                            {isPublishing ? "Updating..." : "Stop Public Stream"}
+                                            {isPublishing ? (
+                                                <>
+                                                    <LoadingSpinner size="sm" />
+                                                    Updating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="h-2.5 w-2.5 rounded-full bg-red-500 border border-red-200" />
+                                                    Stop Public Stream
+                                                </>
+                                            )}
                                         </button>
                                     )}
                                 </div>
@@ -774,6 +813,13 @@ export default function ControlRoomPage() {
                     {/* Start Stream Event Button — shown after key is generated */}
                     {masterStreamKey && !isLive && (
                         <div className="mt-6 p-6 bg-gradient-to-br from-brand-purple/10 to-brand-purple/5 border border-brand-purple/20 rounded-2xl space-y-4">
+                            {streamError && (
+                                <InlineErrorMessage
+                                    error={streamError.message}
+                                    onDismiss={() => setStreamError(null)}
+                                    onRetry={handleStartStreamEvent}
+                                />
+                            )}
                             <div className="space-y-2">
                                 <h3 className="text-sm font-bold text-white">Ready to Stream?</h3>
                                 <p className="text-xs text-white/60 leading-relaxed">
@@ -788,9 +834,16 @@ export default function ControlRoomPage() {
                             <button
                                 onClick={handleStartStreamEvent}
                                 disabled={isLoadingConfig}
-                                className="w-full bg-brand-purple hover:bg-brand-purple/80 disabled:opacity-60 text-white font-bold py-3 px-4 rounded-lg transition-all text-sm"
+                                className="w-full bg-brand-purple hover:bg-brand-purple/80 disabled:opacity-60 text-white font-bold py-3 px-4 rounded-lg transition-all text-sm flex items-center justify-center gap-2"
                             >
-                                {isLoadingConfig ? "Creating Stream Event..." : "Start Stream Event"}
+                                {isLoadingConfig ? (
+                                    <>
+                                        <LoadingSpinner size="sm" />
+                                        Creating Stream Event...
+                                    </>
+                                ) : (
+                                    "Start Stream Event"
+                                )}
                             </button>
                         </div>
                     )}

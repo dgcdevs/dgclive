@@ -1,17 +1,21 @@
 import * as React from "react"
 import { cn } from "@/app/lib/utils"
+import { LoadingSpinner } from "../LoadingSpinner"
 
 export interface ButtonProps
     extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: "default" | "outline" | "ghost"
     size?: "default" | "sm" | "lg"
+    isLoading?: boolean
+    loadingText?: string
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ className, variant = "default", size = "default", ...props }, ref) => {
+    ({ className, variant = "default", size = "default", isLoading = false, loadingText, children, disabled, ...props }, ref) => {
         return (
             <button
                 ref={ref}
+                disabled={disabled || isLoading}
                 className={cn(
                     "inline-flex items-center justify-center rounded-lg text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed",
                     {
@@ -25,7 +29,16 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
                     className
                 )}
                 {...props}
-            />
+            >
+                {isLoading ? (
+                    <>
+                        <LoadingSpinner size="sm" />
+                        <span className="ml-2">{loadingText || children}</span>
+                    </>
+                ) : (
+                    children
+                )}
+            </button>
         )
     }
 )

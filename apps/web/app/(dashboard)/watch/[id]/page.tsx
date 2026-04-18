@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 
 import { VideoPlayer } from "../../../components/video-player"
 import { LiveChat } from "../../../components/live-chat"
+import { LoadingSpinner } from "../../../components/LoadingSpinner"
 import { Share2, Heart, Hand, Zap, Sparkles, Check } from "lucide-react"
 import { useEffect, useState, useRef } from "react"
 import { useParams, useSearchParams } from "next/navigation"
@@ -206,7 +207,7 @@ export default function WatchPage() {
     }
 
     if (isLoading) {
-        return <p className="text-white/60">Loading video...</p>
+        return <div className="flex items-center justify-center min-h-screen"><LoadingSpinner size="lg" message="Loading video..." /></div>
     }
 
     if (errorMessage || !video) {

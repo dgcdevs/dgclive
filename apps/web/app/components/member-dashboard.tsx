@@ -8,6 +8,9 @@ import MuxPlayer from "@mux/mux-player-react"
 import { VideoCard } from "./video-card"
 import { SmallEventCard } from "./small-event-card"
 import { NewsletterBanner } from "./newsletter-banner"
+import { LoadingSpinner } from "./LoadingSpinner"
+import { InlineErrorMessage } from "./InlineErrorMessage"
+import { SkeletonCard } from "./SkeletonCard"
 
 type ArchiveVideo = {
     id: string
@@ -35,10 +38,12 @@ export function MemberDashboard() {
     // NEW states for Live Stream
     const [liveStream, setLiveStream] = useState<any>(null)
     const [isLoadingLiveStream, setIsLoadingLiveStream] = useState(true)
+    const [liveStreamError, setLiveStreamError] = useState("")
 
     const loadLiveStream = async () => {
         try {
             setIsLoadingLiveStream(true)
+            setLiveStreamError("")
             const token = localStorage.getItem("token")
             const headers: Record<string, string> = {}
             if (token) headers.Authorization = `Bearer ${token}`
@@ -52,6 +57,7 @@ export function MemberDashboard() {
             }
         } catch (error) {
             console.error("Failed to load live stream:", error)
+            setLiveStreamError("Failed to load live stream. Please try again.")
             setLiveStream(null)
         } finally {
             setIsLoadingLiveStream(false)
@@ -118,6 +124,7 @@ export function MemberDashboard() {
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "Failed to load archives"
                 setArchiveError(errorMessage)
+                setArchives([])
             } finally {
                 setIsLoadingArchives(false)
             }
@@ -143,7 +150,16 @@ export function MemberDashboard() {
         <div className="space-y-12 pb-12">
             {/* 1. NOW LIVE / FEATURED SECTION */}
             {isLoadingLiveStream ? (
-                <div className="animate-pulse h-[340px] bg-white/5 rounded-2xl w-full border border-white/5"></div>
+                <div className="space-y-4">
+                    <LoadingSpinner size="lg" message="Loading live stream..." />
+                    <div className="animate-pulse h-[340px] bg-white/5 rounded-2xl w-full border border-white/5"></div>
+                </div>
+            ) : liveStreamError ? (
+                <InlineErrorMessage
+                    error={liveStreamError}
+                    onDismiss={() => setLiveStreamError("")}
+                    onRetry={loadLiveStream}
+                />
             ) : liveStream && liveStream.isLive && liveStream.isPublished ? (
                 <section>
                     <div className="flex items-center gap-3 mb-6">
@@ -249,9 +265,16 @@ export function MemberDashboard() {
                 {!hasToken && !isLoadingArchives ? (
                     <p className="text-white/60">Sign in to access the sermon archive.</p>
                 ) : isLoadingArchives ? (
-                    <p className="text-white/60">Loading archives...</p>
+                    <div className="space-y-4">
+                        <LoadingSpinner size="md" message="Loading sermons..." />
+                        <SkeletonCard variant="video-card" count={3} className="grid grid-cols-1 md:grid-cols-3 gap-6 space-y-0" />
+                    </div>
                 ) : archiveError ? (
-                    <p className="text-red-400">{archiveError}</p>
+                    <InlineErrorMessage
+                        error={archiveError}
+                        onRetry={() => window.location.reload()}
+                        onDismiss={() => setArchiveError("")}
+                    />
                 ) : archives.length === 0 ? (
                     <p className="text-white/60">No archived sermons available yet.</p>
                 ) : (
@@ -283,9 +306,16 @@ export function MemberDashboard() {
                                 <button
                                     onClick={handleLoadMore}
                                     disabled={isLoadingMore}
-                                    className="px-8 py-3 bg-brand-purple hover:bg-brand-purple/90 disabled:bg-brand-purple/50 text-white font-bold rounded-lg transition-colors disabled:cursor-not-allowed"
+                                    className="px-8 py-3 bg-brand-purple hover:bg-brand-purple/90 disabled:bg-brand-purple/50 text-white font-bold rounded-lg transition-colors disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                 >
-                                    {isLoadingMore ? "Loading..." : "Load More"}
+                                    {isLoadingMore ? (
+                                        <>
+                                            <LoadingSpinner size="sm" />
+                                            Loading...
+                                        </>
+                                    ) : (
+                                        "Load More"
+                                    )}
                                 </button>
                             </div>
                         )}

@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { VideoCard } from "@/app/components/video-card"
+import { LoadingSpinner } from "@/app/components/LoadingSpinner"
+import { InlineErrorMessage } from "@/app/components/InlineErrorMessage"
+import { SkeletonCard } from "@/app/components/SkeletonCard"
 
 type SearchResult = {
     id: string
@@ -64,6 +67,7 @@ export default function SearchPage() {
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Search failed"
             setError(errorMessage)
+            setResults([])
         } finally {
             setIsLoading(false)
         }
@@ -92,9 +96,16 @@ export default function SearchPage() {
                 {!hasToken && !isLoading ? (
                     <p className="text-white/60">Sign in to access search results.</p>
                 ) : isLoading ? (
-                    <p className="text-white/60">Loading results...</p>
+                    <div className="space-y-4">
+                        <LoadingSpinner size="md" message="Searching..." />
+                        <SkeletonCard variant="video-card" count={3} className="grid grid-cols-1 md:grid-cols-3 gap-6 space-y-0" />
+                    </div>
                 ) : error ? (
-                    <p className="text-red-400">{error}</p>
+                    <InlineErrorMessage
+                        error={error}
+                        onRetry={() => performSearch(initialQuery)}
+                        onDismiss={() => setError("")}
+                    />
                 ) : results.length === 0 ? (
                     <p className="text-white/60">No sermons or events found matching your search.</p>
                 ) : (

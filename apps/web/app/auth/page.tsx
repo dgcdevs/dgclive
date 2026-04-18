@@ -373,10 +373,12 @@ export default function AuthPage() {
 
 									<Button
 										type="submit"
-										disabled={isLoading || formData.verificationCode.length !== 6}
+										isLoading={isLoading}
+										disabled={formData.verificationCode.length !== 6}
 										className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+										loadingText="Verifying..."
 									>
-										{isLoading ? "Verifying..." : "Verify & Create Account"}
+										Verify & Create Account
 									</Button>
 
 									<Button
@@ -492,14 +494,13 @@ export default function AuthPage() {
 
 									<Button
 										type="submit"
-										disabled={isLoading}
-										className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
-									>
-										{isLoading
-											? "Processing..."
-											: activeTab === "signin"
-												? "Sign In"
-												: "Continue"}
+									isLoading={isLoading}
+									className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+									loadingText="Processing..."
+								>
+									{activeTab === "signin"
+										? "Sign In"
+										: "Continue"}
 									</Button>
 								</form>
 							)}
@@ -553,10 +554,12 @@ export default function AuthPage() {
 
 								<Button
 									type="submit"
-									disabled={isLoading || !forgotPasswordEmail}
+									isLoading={isLoading}
+									disabled={!forgotPasswordEmail}
 									className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+									loadingText="Sending..."
 								>
-									{isLoading ? "Sending..." : "Send Reset Code"}
+									Send Reset Code
 								</Button>
 							</form>
 						)}
@@ -617,10 +620,12 @@ export default function AuthPage() {
 
 								<Button
 									type="submit"
-									disabled={isLoading || formData.resetCode.length !== 6}
+									isLoading={isLoading}
+									disabled={formData.resetCode.length !== 6}
 									className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+									loadingText="Resetting..."
 								>
-									{isLoading ? "Resetting..." : "Reset Password"}
+									Reset Password
 								</Button>
 
 								<Button
