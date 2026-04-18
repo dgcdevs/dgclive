@@ -7,7 +7,7 @@ import { useUser } from "../../lib/use-user"
 
 interface Notification {
   id: string
-  type: 'UPCOMING_SERVICE' | 'LIVESTREAM_STARTED' | 'NEW_VIDEO'
+  type: 'UPCOMING_SERVICE' | 'LIVESTREAM_STARTED' | 'STREAM_DELAYED' | 'STREAM_ENDED' | 'NEW_VIDEO' | 'NEW_SCHEDULE_POSTED'
   title: string
   description: string
   isRead: boolean
@@ -27,22 +27,43 @@ export function NotificationDropdown() {
 
   // Fetch notifications from API
   const fetchNotifications = async () => {
+    const token = localStorage.getItem('token')
+    if (!user?.id || !token) {
+      setNotifications([])
+      setUnreadCount(0)
+      setError(null)
+      return
+    }
+
     try {
       setIsLoading(true)
-      const token = localStorage.getItem('token')
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notifications?limit=10`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
 
-      if (!res.ok) throw new Error('Failed to fetch notifications')
+      if (res.status === 401 || res.status === 403) {
+        setNotifications([])
+        setUnreadCount(0)
+        setError(null)
+        return
+      }
+
+      if (!res.ok) {
+        setNotifications([])
+        setUnreadCount(0)
+        setError('Notifications are temporarily unavailable')
+        return
+      }
 
       const data = await res.json()
       setNotifications(data.notifications || [])
       setUnreadCount(data.unreadCount || 0)
       setError(null)
     } catch (err) {
-      console.error('[Notifications] Fetch error:', err)
-      setError('Failed to load notifications')
+      console.warn('[Notifications] Fetch warning:', err)
+      setNotifications([])
+      setUnreadCount(0)
+      setError('Notifications are temporarily unavailable')
     } finally {
       setIsLoading(false)
     }
@@ -140,6 +161,12 @@ export function NotificationDropdown() {
         return <div className="w-2 h-2 rounded-full bg-blue-500" />
       case 'UPCOMING_SERVICE':
         return <div className="w-2 h-2 rounded-full bg-green-500" />
+      case 'STREAM_DELAYED':
+        return <div className="w-2 h-2 rounded-full bg-yellow-500" />
+      case 'STREAM_ENDED':
+        return <div className="w-2 h-2 rounded-full bg-zinc-400" />
+      case 'NEW_SCHEDULE_POSTED':
+        return <div className="w-2 h-2 rounded-full bg-purple-500" />
       default:
         return <div className="w-2 h-2 rounded-full bg-white/40" />
     }

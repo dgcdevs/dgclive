@@ -88,7 +88,7 @@ export default function WatchPage() {
                 setIsPublished(data.isPublished || false)
 
                 // Increment view count
-                void fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${data.id}/view`, {
+                void fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${data.id}/view?source=${source}`, {
                     method: "POST",
                     headers: { Authorization: `Bearer ${token}` }
                 });
@@ -285,7 +285,10 @@ export default function WatchPage() {
 
             {/* Right Column: Live Chat & Comments */}
             <div className="lg:col-span-1 h-[calc(100vh-120px)] sticky top-24">
-                <LiveChat />
+                <LiveChat
+                    eventId={source === "mux" ? video.id : undefined}
+                    youtubeVideoId={source === "youtube" ? video.id : undefined}
+                />
             </div>
         </div>
     )

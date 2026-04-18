@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 export type Role = 'MEMBER' | 'MEDIA' | 'ADMIN';
 
@@ -23,6 +23,11 @@ export function useUser() {
 
         const token = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
+        const clearSession = () => {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setUser(null);
+        };
 
         // Optimistic update from local storage first
         if (storedUser) {
@@ -32,6 +37,12 @@ export function useUser() {
         }
 
         if (token) {
+            if (token.split('.').length !== 3) {
+                clearSession();
+                setLoading(false);
+                return;
+            }
+
             // Validate session with server
             fetch(`${process.env.NEXT_PUBLIC_API_URL}/me`, {
                 headers: {
@@ -40,8 +51,7 @@ export function useUser() {
             })
                 .then(async res => {
                     if (res.ok) return res.json();
-                    const err = await res.json().catch(() => ({}));
-                    console.error("Auth Error Body:", err);
+                    await res.json().catch(() => ({})); // Read and discard body
                     throw new Error("Session invalid");
                 })
                 .then(data => {
@@ -52,15 +62,16 @@ export function useUser() {
                     }
                 })
                 .catch(err => {
-                    console.error("Session revalidation failed:", err);
+                    // console.error("Session revalidation failed:", err);
                     // If 401/403 (implied by throw above), we might want to logout
                     // For now, if strictly invalid, we clear. 
                     // But network error shouldn't logout. 
                     // Let's rely on simple catch for now but clearing on explicit auth failure is better.
                     if (err.message === "Session invalid") {
-                        localStorage.removeItem('token');
-                        localStorage.removeItem('user');
-                        setUser(null);
+                        clearSession();
+                        window.location.href = '/auth';
+                    } else {
+                        console.error("Session revalidation failed:", err);
                     }
                 })
                 .finally(() => setLoading(false));
@@ -69,10 +80,10 @@ export function useUser() {
         }
     }, []);
 
-    const hasRole = (allowedRoles: Role[]) => {
+    const hasRole = useCallback((allowedRoles: Role[]) => {
         if (!user) return false;
         return allowedRoles.includes(user.role);
-    };
+    }, [user]);
 
     return { user, loading, hasRole };
 }

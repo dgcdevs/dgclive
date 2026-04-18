@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { io as socketIO } from "socket.io-client"
 import MuxPlayer from "@mux/mux-player-react"
+import { useRouter } from "next/navigation"
 import { VideoCard } from "./video-card"
 import { SmallEventCard } from "./small-event-card"
 import { NewsletterBanner } from "./newsletter-banner"
@@ -20,14 +21,39 @@ type ArchiveVideo = {
     youtubeId?: string
     channelTitle?: string
     muxPlaybackId?: string
+    speaker?: string
+    category?: string
+    topics?: string[]
+    isMembersOnly?: boolean
+}
+
+type ScheduledService = {
+    id: string
+    title: string
+    description: string
+    startTime: string
+    isPublic: boolean
+    thumbnailUrl?: string
+    muxPlaybackId?: string
+    preacherName?: string
+    category?: string
+    recurrenceRule: "NONE" | "DAILY" | "WEEKLY" | "BIWEEKLY" | "MONTHLY"
+    editorialStatus: "DRAFT" | "SCHEDULED" | "READY" | "LIVE" | "ENDED" | "ARCHIVED" | "CANCELLED"
+    countdownEnabled: boolean
+    countdownOffsetMinutes: number
 }
 
 export function MemberDashboard() {
+    const router = useRouter()
     const [archives, setArchives] = useState<ArchiveVideo[]>([])
-    const [demoLiveVideos, setDemoLiveVideos] = useState<ArchiveVideo[]>([])
-    const [demoUpcomingVideos, setDemoUpcomingVideos] = useState<ArchiveVideo[]>([])
+    const [popularArchives, setPopularArchives] = useState<ArchiveVideo[]>([])
+    const [browseTopics, setBrowseTopics] = useState<string[]>([])
+    const [browseCategories, setBrowseCategories] = useState<string[]>([])
+    const [scheduledServices, setScheduledServices] = useState<ScheduledService[]>([])
     const [isLoadingArchives, setIsLoadingArchives] = useState(true)
+    const [isLoadingUpcoming, setIsLoadingUpcoming] = useState(true)
     const [archiveError, setArchiveError] = useState("")
+    const [upcomingError, setUpcomingError] = useState("")
     const [hasToken, setHasToken] = useState(false)
     const [displayCount, setDisplayCount] = useState(12)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
@@ -81,6 +107,41 @@ export function MemberDashboard() {
     }, [])
 
     useEffect(() => {
+        const token = localStorage.getItem("token")
+        if (!token) {
+            setIsLoadingUpcoming(false)
+            return
+        }
+
+        const loadScheduledServices = async () => {
+            try {
+                setIsLoadingUpcoming(true)
+                setUpcomingError("")
+
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/scheduled-services`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                })
+
+                const data = await res.json()
+                if (!res.ok) {
+                    throw new Error(data.error || "Failed to load scheduled services")
+                }
+
+                setScheduledServices(data.services || [])
+            } catch (err) {
+                const errorMessage = err instanceof Error ? err.message : "Failed to load scheduled services"
+                setUpcomingError(errorMessage)
+            } finally {
+                setIsLoadingUpcoming(false)
+            }
+        }
+
+        void loadScheduledServices()
+    }, [])
+
+    useEffect(() => {
         const loadArchives = async () => {
             try {
                 setIsLoadingArchives(true)
@@ -95,7 +156,7 @@ export function MemberDashboard() {
                 }
 
                 setHasToken(true)
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/archive?source=all&take=100`, {
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/discover?take=24&sort=newest`, {
                     headers: {
                         Authorization: `Bearer ${token}`
                     }
@@ -106,15 +167,10 @@ export function MemberDashboard() {
                     throw new Error(data.error || "Failed to load archives")
                 }
 
-                const archivesList = data.archives || []
-                setArchives(archivesList)
-
-                // Get random demo videos for live and upcoming sections
-                if (archivesList.length > 0) {
-                    const shuffled = [...archivesList].sort(() => 0.5 - Math.random())
-                    setDemoLiveVideos(shuffled.slice(0, 2))
-                    setDemoUpcomingVideos(shuffled.slice(2, 7))
-                }
+                setArchives(data.results || [])
+                setPopularArchives(data.collections?.popular || [])
+                setBrowseTopics((data.facets?.topics || []).slice(0, 6).map((item: { value: string }) => item.value))
+                setBrowseCategories((data.facets?.categories || []).slice(0, 5).map((item: { value: string }) => item.value))
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "Failed to load archives"
                 setArchiveError(errorMessage)
@@ -137,6 +193,17 @@ export function MemberDashboard() {
     const formatDate = (value: string) => {
         const date = new Date(value)
         return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date)
+    }
+
+    const formatUpcomingDate = (value: string) => {
+        const date = new Date(value)
+        return new Intl.DateTimeFormat("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+        }).format(date)
     }
 
     return (
@@ -220,26 +287,28 @@ export function MemberDashboard() {
             <section>
                 <h2 className="text-2xl font-bold text-white mb-6">Upcoming Services & Events</h2>
 
-                {/* Horizontal Scroll Container */}
-                <div className="flex overflow-x-auto gap-4 pb-4 -mx-6 px-6 scrollbar-hide">
-                    {demoUpcomingVideos.map((video) => {
-                        const times = ["Mon, 6:00 PM", "Wed, 7:00 PM", "Fri, 6:00 PM", "Sat, 10:00 AM", "Sun, 9:30 AM"]
-                        const randomTime = times[Math.floor(Math.random() * times.length)]
-                        const randomWaiting = Math.floor(Math.random() * 200) + 10
-
-                        return (
+                {isLoadingUpcoming ? (
+                    <p className="text-white/60">Loading upcoming services...</p>
+                ) : upcomingError ? (
+                    <p className="text-red-400">{upcomingError}</p>
+                ) : scheduledServices.length === 0 ? (
+                    <p className="text-white/60">No upcoming services scheduled yet.</p>
+                ) : (
+                    <div className="flex overflow-x-auto gap-4 pb-4 -mx-6 px-6 scrollbar-hide">
+                        {scheduledServices.map((service) => (
                             <SmallEventCard
-                                key={video.id}
-                                id={video.youtubeId || video.id}
-                                date={randomTime}
-                                title={video.title}
-                                churchName={video.channelTitle || "Davidic Generation Church"}
-                                waitingCount={randomWaiting}
-                                thumbnail={video.thumbnailUrl}
+                                key={service.id}
+                                id={service.id}
+                                href="/upcoming"
+                                date={formatUpcomingDate(service.startTime)}
+                                title={service.title}
+                                churchName={service.preacherName || (service.isPublic ? "Davidic Generation Church" : "Members-only service")}
+                                thumbnail={service.thumbnailUrl}
+                                muxPlaybackId={service.muxPlaybackId}
                             />
-                        )
-                    })}
-                </div>
+                        ))}
+                    </div>
+                )}
             </section>
 
 
@@ -268,11 +337,14 @@ export function MemberDashboard() {
                                         key={video.id}
                                         type="vod"
                                         title={video.title}
-                                        preacher={video.channelTitle || "Davidic Generation Church"}
-                                        church={viewText}
+                                        preacher={video.speaker || video.channelTitle || "Davidic Generation Church"}
+                                        church={video.isMembersOnly ? "Members only replay" : viewText}
                                         date={formatDate(video.publishedAt)}
                                         thumbnail={video.thumbnailUrl}
+                                        muxPlaybackId={video.muxPlaybackId}
                                         source={video.source}
+                                        category={video.category}
+                                        topics={video.topics}
                                         href={isYouTube ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`}
                                     />
                                 )
@@ -291,6 +363,61 @@ export function MemberDashboard() {
                         )}
                     </>
                 )}
+            </section>
+
+            <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-2xl border border-white/10 bg-[#111111] p-6">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-white">Browse by Topic</h2>
+                            <p className="mt-1 text-sm text-white/55">Jump into the archive through subjects members are likely to explore.</p>
+                        </div>
+                        <Link href="/search" className="text-sm font-semibold text-brand-purple hover:text-brand-purple/80">
+                            Full library
+                        </Link>
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap gap-3">
+                        {browseTopics.map((item) => (
+                            <button
+                                key={item}
+                                onClick={() => router.push(`/search?topic=${encodeURIComponent(item)}`)}
+                                className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white/80 transition-colors hover:border-brand-purple/40 hover:bg-brand-purple/10 hover:text-white"
+                            >
+                                {item}
+                            </button>
+                        ))}
+                        {browseCategories.map((item) => (
+                            <button
+                                key={item}
+                                onClick={() => router.push(`/search?category=${encodeURIComponent(item)}`)}
+                                className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm font-medium text-white/70 transition-colors hover:border-brand-purple/40 hover:text-white"
+                            >
+                                {item}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#111111] p-6">
+                    <h2 className="text-xl font-bold text-white">Popular Replays</h2>
+                    <p className="mt-1 text-sm text-white/55">A quick path into the most discovered messages in the library.</p>
+
+                    <div className="mt-5 space-y-3">
+                        {popularArchives.slice(0, 4).map((video) => (
+                            <button
+                                key={video.id}
+                                onClick={() => router.push(video.source === "youtube" ? `/watch/${video.youtubeId}?source=youtube` : `/watch/${video.id}`)}
+                                className="w-full rounded-xl border border-white/8 bg-white/5 p-4 text-left transition-colors hover:border-brand-purple/30 hover:bg-white/8"
+                            >
+                                <p className="text-sm font-semibold text-white line-clamp-1">{video.title}</p>
+                                <p className="mt-1 text-xs text-white/45">
+                                    {(video.speaker || video.channelTitle || "Davidic Generation Church")} • {video.category || "Teaching"}
+                                </p>
+                            </button>
+                        ))}
+                    </div>
+                </div>
             </section>
 
             {/* 4. NEWSLETTER */}

@@ -2,6 +2,18 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middleware/requireAuth';
 
+type NotificationRepository = {
+  findMany: (...args: any[]) => Promise<any>;
+  count: (...args: any[]) => Promise<any>;
+  findUnique: (...args: any[]) => Promise<any>;
+  update: (...args: any[]) => Promise<any>;
+  updateMany: (...args: any[]) => Promise<any>;
+};
+
+const notificationsRepo = (prisma as typeof prisma & {
+  notification: NotificationRepository;
+}).notification;
+
 /**
  * GET /notifications
  * Fetch all unread notifications for the current user
@@ -23,7 +35,7 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(getQueryString(req.query.limit, '10'), 10) || 10, 50);
     const offset = parseInt(getQueryString(req.query.offset, '0'), 10) || 0;
 
-    const notifications = await prisma.notification.findMany({
+    const notifications = await notificationsRepo.findMany({
       where: {
         userId,
         isRead: false,
@@ -35,7 +47,7 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
       skip: offset,
     });
 
-    const unreadCount = await prisma.notification.count({
+    const unreadCount = await notificationsRepo.count({
       where: {
         userId,
         isRead: false,
@@ -81,7 +93,7 @@ export const markNotificationAsRead = async (req: AuthRequest, res: Response) =>
     }
 
     // Verify the notification belongs to this user
-    const notification = await prisma.notification.findUnique({
+    const notification = await notificationsRepo.findUnique({
       where: { id: notificationId },
     });
 
@@ -94,7 +106,7 @@ export const markNotificationAsRead = async (req: AuthRequest, res: Response) =>
     }
 
     // Mark as read
-    const updated = await prisma.notification.update({
+    const updated = await notificationsRepo.update({
       where: { id: notificationId },
       data: { isRead: true },
     });
@@ -119,7 +131,7 @@ export const markAllNotificationsAsRead = async (req: AuthRequest, res: Response
     }
 
     // Update all unread notifications for this user
-    const result = await prisma.notification.updateMany({
+    const result = await notificationsRepo.updateMany({
       where: {
         userId,
         isRead: false,

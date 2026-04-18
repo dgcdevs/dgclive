@@ -6,18 +6,45 @@ export interface AuthRequest extends Request {
 	user?: any;
 }
 
+// In-memory cache for valid tokens to prevent rate-limiting and timeouts during frequent polling (e.g. Chat)
+const tokenCache = new Map<string, { profile: any, expiresAt: number }>();
+
+// Clear expired cache entries periodically every 10 mins
+setInterval(() => {
+	const now = Date.now();
+	for (const [key, value] of tokenCache.entries()) {
+		if (value.expiresAt <= now) {
+			tokenCache.delete(key);
+		}
+	}
+}, 10 * 60 * 1000);
+
 export const requireAuth = async (req: AuthRequest, res: Response, next: NextFunction) => {
 	try {
 		// We explicitly tell TypeScript: "Trust me, this is a string"
 		const authHeader = req.headers.authorization as string;
 		if (!authHeader) return res.status(401).json({ error: "Missing Token" });
+		if (!authHeader.startsWith('Bearer ')) {
+			return res.status(401).json({ error: "Invalid Token Format" });
+		}
 
 		const token = authHeader.split(' ')[1];
+		if (!token || token.split('.').length !== 3) {
+			return res.status(401).json({ error: "Invalid Token Format" });
+		}
+
+		// Check Cache First (Reduces load on Supabase Auth API)
+		const now = Date.now();
+		const cached = tokenCache.get(token);
+		if (cached && cached.expiresAt > now) {
+			req.user = cached.profile;
+			return next();
+		}
 
 		// 1. Verify Token with Supabase
 		const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 		if (error) {
-			console.error("Supabase Auth Error:", error);
+			console.warn(`Supabase Auth rejected token: ${error.message}`);
 			return res.status(401).json({ error: "Invalid Token", details: error.message });
 		}
 		if (!user) {
@@ -33,6 +60,9 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
 		if (profile.isBanned) {
 			return res.status(403).json({ error: "Your account has been suspended." });
 		}
+
+		// Save to Cache for 60 seconds
+		tokenCache.set(token, { profile, expiresAt: Date.now() + 60 * 1000 });
 
 		req.user = profile;
 		next();

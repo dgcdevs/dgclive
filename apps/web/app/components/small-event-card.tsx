@@ -1,27 +1,34 @@
 import Link from "next/link"
 import { Clock } from "lucide-react"
-import { cn } from "../lib/utils"
+import { cn, getFreshThumbnail } from "../lib/utils"
+import Image from "next/image"
+import LogoImage from "@/assets/images/dgclivelogo.png"
 
 interface SmallEventCardProps {
     id: string
     title: string
     churchName: string
     thumbnail?: string
+    muxPlaybackId?: string
     date: string // e.g., "Fri, 6:00 PM"
     waitingCount?: number
+    href?: string
 }
 
 export function SmallEventCard({
     id,
     title,
     churchName,
-    thumbnail,
+    thumbnail: _thumbnail,
+    muxPlaybackId,
     date,
-    waitingCount
+    waitingCount,
+    href = "/upcoming"
 }: SmallEventCardProps) {
+    const thumbnail = getFreshThumbnail(_thumbnail, muxPlaybackId)
     return (
         <Link
-            href={`/event/${id}`}
+            href={href}
             className="group block relative min-w-[280px] w-[280px] rounded-xl overflow-hidden bg-[#111] border border-white/5 hover:border-white/20 transition-all duration-300"
         >
             {/* Thumbnail */}
@@ -31,7 +38,7 @@ export function SmallEventCard({
                     className="absolute inset-0 bg-zinc-800 bg-cover bg-center"
                     style={thumbnail ? { backgroundImage: `url(${thumbnail})` } : undefined}
                 />
-                
+
                 {/* Gradient Overlay */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
 
@@ -46,8 +53,8 @@ export function SmallEventCard({
             <div className="p-4">
                 <div className="flex gap-3 items-start">
                     {/* Church Avatar */}
-                    <div className="w-8 h-8 rounded-full bg-brand-purple/20 border border-brand-purple/30 flex items-center justify-center shrink-0 mt-0.5">
-                        <span className="text-[10px] font-bold text-brand-purple">DGC</span>
+                    <div className="w-8 h-8 rounded-full bg-black border border-white/10 flex items-center justify-center shrink-0 mt-0.5 overflow-hidden">
+                        <Image src={LogoImage} alt="DGC Logo" className="w-full h-full object-contain p-0.5" />
                     </div>
 
                     <div className="flex-1 min-w-0">

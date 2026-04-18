@@ -1,5 +1,6 @@
 import { Calendar, Clock, MapPin } from "lucide-react"
-
+import Image from "next/image"
+import LogoImage from "@/assets/images/dgclivelogo.png"
 interface EventCardProps {
     title: string
     host: string
@@ -23,8 +24,8 @@ export function EventCard({ title, host, waiting }: EventCardProps) {
                 {/* Right: Info */}
                 <div className="flex flex-1 flex-col justify-center px-3 md:px-4">
                     <div className="flex items-start gap-2 md:gap-3">
-                        <div className="h-8 w-8 rounded-full bg-brand-purple/20 flex items-center justify-center shrink-0 border border-white/10">
-                            <span className="text-[10px] font-bold text-white">DGC</span>
+                        <div className="h-8 w-8 rounded-full bg-black flex items-center justify-center shrink-0 border border-white/10 overflow-hidden">
+                            <Image src={LogoImage} alt="DGC Logo" className="w-full h-full object-contain p-0.5" />
                         </div>
                         <div>
                             <h4 className="text-sm font-bold text-white group-hover:text-brand-purple transition-colors">{title}</h4>

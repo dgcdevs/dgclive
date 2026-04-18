@@ -53,6 +53,17 @@ io.on("connection", (socket) => {
 		socket.join(roomName);
 	});
 
+	socket.on("join-chat-room", (roomName: string) => {
+		if (!roomName) return;
+		console.log(`[Socket.io] ${socket.id} joined chat room: ${roomName}`);
+		socket.join(roomName);
+	});
+
+	socket.on("leave-chat-room", (roomName: string) => {
+		if (!roomName) return;
+		socket.leave(roomName);
+	});
+
 	// Auto-join user to notifications room if they provide userId
 	socket.on("join-notifications", (userId: string) => {
 		if (userId) {

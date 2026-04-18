@@ -1,14 +1,13 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { fetchChannelVideos } from '../lib/youtube';
 import { mux } from '../lib/mux';
 import { createNotification } from '../lib/notifications';
 import { io } from '../index';
 
-// Phase 4: Discipline (Ban User)
+// Phase 4: Discipline (Suspend User)
 export const banUser = async (req: Request, res: Response) => {
-    const { userId } = req.params; // Get ID from URL (e.g., /users/123/ban)
+    const { userId } = req.params;
 
     if (typeof userId !== 'string') {
         res.status(400).json({ error: "Invalid user ID" });
@@ -16,19 +15,77 @@ export const banUser = async (req: Request, res: Response) => {
     }
 
     try {
-        // 1. Mark as Banned in Database
-        await prisma.profile.update({
+        const user = await prisma.profile.findUnique({
+            where: { id: userId },
+            select: { id: true, role: true, isBanned: true, fullName: true }
+        });
+
+        if (!user) {
+            res.status(404).json({ error: "User not found" });
+            return;
+        }
+
+        if (user.role === 'ADMIN') {
+            res.status(400).json({ error: "Admins cannot be suspended from this control" });
+            return;
+        }
+
+        if (user.isBanned) {
+            res.status(400).json({ error: "User is already suspended" });
+            return;
+        }
+
+        const updatedUser = await prisma.profile.update({
             where: { id: userId },
             data: { isBanned: true }
         });
 
-        // 2. Kill their Session in Supabase (Force Logout)
-        // This creates a "Time Out" - they cannot log back in.
-        await supabaseAdmin.auth.admin.deleteUser(userId);
-
-        res.json({ message: "User has been banned and removed." });
+        res.json({
+            message: `${updatedUser.fullName} has been suspended. Their account remains recoverable.`,
+            user: updatedUser
+        });
     } catch (error) {
-        res.status(500).json({ error: "Failed to ban user" });
+        console.error("Failed to suspend user", error);
+        res.status(500).json({ error: "Failed to suspend user" });
+    }
+}
+
+export const reactivateUser = async (req: Request, res: Response) => {
+    const { userId } = req.params;
+
+    if (typeof userId !== 'string') {
+        res.status(400).json({ error: "Invalid user ID" });
+        return;
+    }
+
+    try {
+        const user = await prisma.profile.findUnique({
+            where: { id: userId },
+            select: { id: true, isBanned: true, fullName: true }
+        });
+
+        if (!user) {
+            res.status(404).json({ error: "User not found" });
+            return;
+        }
+
+        if (!user.isBanned) {
+            res.status(400).json({ error: "User is not suspended" });
+            return;
+        }
+
+        const updatedUser = await prisma.profile.update({
+            where: { id: userId },
+            data: { isBanned: false }
+        });
+
+        res.json({
+            message: `${updatedUser.fullName} has been reactivated.`,
+            user: updatedUser
+        });
+    } catch (error) {
+        console.error("Failed to reactivate user", error);
+        res.status(500).json({ error: "Failed to reactivate user" });
     }
 }
 
