@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Navbar } from "../components/navbar"
 import { useUser } from "../../lib/use-user"
+import { LoadingSpinner } from "../components/LoadingSpinner"
 
 export default function DashboardLayout({
     children,
@@ -24,7 +25,7 @@ export default function DashboardLayout({
     }, [user, loading, router])
 
     if (loading) {
-        return <div className="min-h-screen bg-brand-bg flex items-center justify-center text-white">Loading...</div>
+        return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><LoadingSpinner size="lg" message="Loading..." /></div>
     }
 
     return (

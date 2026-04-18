@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useUser } from "../../../lib/use-user"
 import { supabase } from "../../lib/supabase"
+import { LoadingSpinner } from "../../components/LoadingSpinner"
+import { InlineErrorMessage } from "../../components/InlineErrorMessage"
+import { LoadingOverlay } from "../../components/LoadingOverlay"
 
 export default function CreateServicePage() {
     const { hasRole, loading } = useUser()
@@ -23,6 +26,8 @@ export default function CreateServicePage() {
     const [thumbnailFile, setThumbnailFile] = useState<File | null>(null)
     const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null)
     const [isUploading, setIsUploading] = useState(false)
+    const [uploadError, setUploadError] = useState<string | null>(null)
+    const [streamError, setStreamError] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -60,8 +65,7 @@ export default function CreateServicePage() {
                 .upload(filePath, thumbnailFile)
 
             if (uploadError) {
-                console.error("Upload Error:", uploadError)
-                throw uploadError
+                throw new Error(uploadError.message || 'Failed to upload thumbnail')
             }
 
             const { data } = supabase.storage
@@ -70,20 +74,24 @@ export default function CreateServicePage() {
 
             return data.publicUrl
         } catch (error) {
-            console.error("Error uploading thumbnail:", error)
-            alert("Failed to upload thumbnail")
-            return null
+            const message = error instanceof Error ? error.message : 'Failed to upload thumbnail'
+            setUploadError(message)
+            throw error
         }
     }
 
     const handleStartStream = async () => {
+        // Reset errors
+        setUploadError(null)
+        setStreamError(null)
+
         if (!title) {
-            alert("Please enter a service title")
+            setStreamError("Please enter a service title")
             return
         }
 
         if (scheduleType === 'later' && !scheduledTime) {
-            alert("Please select a date and time for the scheduled stream")
+            setStreamError("Please select a date and time for the scheduled stream")
             return
         }
 
@@ -121,11 +129,12 @@ export default function CreateServicePage() {
                 router.push("/stream")
             } else {
                 const data = await res.json()
-                alert(data.error || "Failed to start stream")
+                throw new Error(data.error || "Failed to start stream")
             }
         } catch (e) {
+            const message = e instanceof Error ? e.message : 'An unexpected error occurred'
+            setStreamError(message)
             console.error(e)
-            alert("Error starting stream")
         } finally {
             setIsSubmitting(false)
             setIsUploading(false)
@@ -254,9 +263,19 @@ export default function CreateServicePage() {
                 {/* Stream Thumbnail */}
                 <div className="space-y-2">
                     <label className="text-xs font-semibold text-white/90 ml-1">Stream Thumbnail</label>
+                    {uploadError && (
+                        <InlineErrorMessage
+                            error={uploadError}
+                            onDismiss={() => setUploadError(null)}
+                            onRetry={() => {
+                                setUploadError(null)
+                                handleStartStream()
+                            }}
+                        />
+                    )}
                     <div
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`w-full h-64 rounded-xl border border-dashed ${thumbnailPreview ? 'border-brand-purple/50' : 'border-white/20'} flex flex-col items-center justify-center text-center cursor-pointer hover:bg-white/5 transition-colors group relative overflow-hidden`}
+                        onClick={() => !isUploading && fileInputRef.current?.click()}
+                        className={`w-full h-64 rounded-xl border border-dashed ${thumbnailPreview ? 'border-brand-purple/50' : 'border-white/20'} flex flex-col items-center justify-center text-center cursor-pointer hover:bg-white/5 transition-colors group relative overflow-hidden ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <input
                             type="file"
@@ -264,9 +283,15 @@ export default function CreateServicePage() {
                             className="hidden"
                             onChange={handleFileSelect}
                             accept="image/*"
+                            disabled={isUploading}
                         />
 
-                        {thumbnailPreview ? (
+                        {isUploading ? (
+                            <div className="flex flex-col items-center gap-2">
+                                <LoadingSpinner size="lg" />
+                                <p className="text-sm text-white/70">Uploading thumbnail...</p>
+                            </div>
+                        ) : thumbnailPreview ? (
                             <>
                                 <img src={thumbnailPreview} alt="Thumbnail preview" className="absolute inset-0 w-full h-full object-cover" />
                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center">
@@ -292,6 +317,18 @@ export default function CreateServicePage() {
                 </div>
 
 
+                {/* Errors */}
+                {streamError && (
+                    <InlineErrorMessage
+                        error={streamError}
+                        onDismiss={() => setStreamError(null)}
+                        onRetry={() => {
+                            setStreamError(null)
+                            handleStartStream()
+                        }}
+                    />
+                )}
+
                 {/* Action Buttons */}
                 <div className="flex gap-4 pt-4">
                     <button className="flex-1 py-3 rounded-lg text-sm font-bold text-white/70 bg-[#1A1A1A] hover:bg-[#252525] hover:text-white transition-all">
@@ -299,10 +336,17 @@ export default function CreateServicePage() {
                     </button>
                     <button
                         onClick={handleStartStream}
-                        disabled={isSubmitting}
-                        className="flex-[3] flex items-center justify-center py-3 rounded-lg text-sm font-bold text-white bg-[#A828FF] hover:bg-[#9222de] shadow-[0_0_20px_rgba(168,40,255,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isSubmitting || isUploading}
+                        className="flex-[3] flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold text-white bg-[#A828FF] hover:bg-[#9222de] shadow-[0_0_20px_rgba(168,40,255,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {isSubmitting ? (isUploading ? "Uploading Thumbnail..." : "Starting Stream...") : "Enter Control Room"}
+                        {isSubmitting || isUploading ? (
+                            <>
+                                <LoadingSpinner size="sm" />
+                                {isUploading ? "Uploading..." : "Starting Stream..."}
+                            </>
+                        ) : (
+                            "Enter Control Room"
+                        )}
                     </button>
                 </div>
             </div>
