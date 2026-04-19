@@ -46,7 +46,7 @@ export function ChatInput({ channel, isMuted, isBanned, isConnected, disabled = 
 
   if (isBanned) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-center text-red-700 text-sm">
+      <div className="p-4 bg-red-950/30 border border-red-500/50 rounded-lg text-center text-red-300 text-sm">
         You are banned from chat
       </div>
     );
@@ -54,7 +54,7 @@ export function ChatInput({ channel, isMuted, isBanned, isConnected, disabled = 
 
   if (isMuted) {
     return (
-      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-center text-yellow-700 text-sm">
+      <div className="p-4 bg-yellow-950/30 border border-yellow-500/50 rounded-lg text-center text-yellow-300 text-sm">
         You are muted - wait for a moderator to unmute you
       </div>
     );
@@ -62,7 +62,7 @@ export function ChatInput({ channel, isMuted, isBanned, isConnected, disabled = 
 
   return (
     <form onSubmit={handleSendMessage} className="flex flex-col gap-2">
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
 
       <div className="flex gap-2">
         <input
@@ -76,12 +76,12 @@ export function ChatInput({ channel, isMuted, isBanned, isConnected, disabled = 
           placeholder={disabled ? 'Chat not available' : 'Type a message...'}
           disabled={disabled || !isConnected}
           maxLength={500}
-          className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed text-sm"
+          className="flex-1 px-4 py-2 border border-white/20 rounded-lg bg-white/5 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed text-sm"
         />
         <button
           type="submit"
           disabled={!canSend}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
         >
           {isSending ? (
             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -91,7 +91,7 @@ export function ChatInput({ channel, isMuted, isBanned, isConnected, disabled = 
         </button>
       </div>
 
-      <p className="text-xs text-gray-500">{message.length}/500</p>
+      <p className="text-xs text-white/40">{message.length}/500</p>
     </form>
   );
 }

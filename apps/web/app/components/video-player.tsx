@@ -8,6 +8,7 @@ interface VideoPlayerProps {
     viewerCount?: number
     youtubeId?: string
     muxPlaybackId?: string
+    isMedia?: boolean
 }
 
 /**
@@ -24,9 +25,12 @@ export function VideoPlayer({
     viewerCount,
     youtubeId,
     muxPlaybackId,
+    isMedia = false,
 }: VideoPlayerProps) {
     const thumbnail = getFreshThumbnail(_thumbnail, muxPlaybackId)
     const isYouTube = Boolean(youtubeId)
+    // Media can always see the stream; regular users see it only when published
+    const canViewStream = isPublished || isMedia
 
     // Derive the correct stream type:
     // - Live + published → "live" (enables DVR scrubbing at live edge)
@@ -51,8 +55,8 @@ export function VideoPlayer({
             {/* ── MuxPlayer: unmounted when !isPublished to prevent caching ── */}
             {!isYouTube && muxPlaybackId && (
                 <>
-                    {/* The player itself — only mounts when published */}
-                    {isPublished && (
+                    {/* The player itself — only mounts when published or for media */}
+                    {canViewStream && (
                         <div
                             key={muxPlaybackId}
                             className="absolute inset-0 z-10"
@@ -73,10 +77,10 @@ export function VideoPlayer({
                         </div>
                     )}
 
-                    {/* Curtain / standby overlay — shown when !isPublished */}
+                    {/* Curtain / standby overlay — shown when !published and not media */}
                     <div
                         className={`absolute inset-0 z-10 flex flex-col items-center justify-center p-6 text-center transition-opacity duration-700
-                            ${isPublished ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+                            ${canViewStream ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
                         style={thumbnail ? { backgroundImage: `url(${thumbnail})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
                     >
                         {/* Blur overlay on top of thumbnail */}
