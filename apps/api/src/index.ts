@@ -20,6 +20,77 @@ export const io = new SocketIOServer(httpServer, {
 	transports: ['websocket', 'polling'],
 });
 
+// ========================================
+// HEARTBEAT & STREAM LIFECYCLE TRACKING
+// ========================================
+// Track media connection heartbeats: { eventId: { timestamp, userId, recoveryEnd } }
+export const streamHeartbeats = new Map<string, { timestamp: number; userId: string; recoveryEnd: number }>();
+
+// Check for disconnected media and auto-unpublish orphaned streams
+async function checkForDisconnectedMedia() {
+	const now = Date.now();
+	const DISCONNECT_THRESHOLD = 15000; // 15 seconds without heartbeat = disconnect
+	const RECOVERY_WINDOW = 2 * 60 * 1000; // 2-minute recovery window
+
+	for (const [eventId, heartbeat] of streamHeartbeats) {
+		const timeSinceLastHeartbeat = now - heartbeat.timestamp;
+
+		// If in recovery window and haven't timed out yet, wait
+		if (now < heartbeat.recoveryEnd) {
+			if (timeSinceLastHeartbeat < DISCONNECT_THRESHOLD) continue; // Still active
+		} else {
+			// Recovery window expired - media didn't rejoin
+			if (timeSinceLastHeartbeat > DISCONNECT_THRESHOLD) {
+				try {
+					const stream = await prisma.event.findUnique({ where: { id: eventId } });
+					if (!stream) {
+						streamHeartbeats.delete(eventId);
+						continue;
+					}
+
+					// Auto-unpublish for viewers
+					if (stream.isPublished) {
+						await prisma.event.update({
+							where: { id: eventId },
+							data: { isPublished: false }
+						});
+
+						// Notify all viewers that stream has stopped
+						io.emit("STREAM_UNPUBLISHED", {
+							eventId,
+							reason: "media_disconnect",
+							message: "Stream disconnected - media offline"
+						});
+
+						console.log(`[Stream Lifecycle] Auto-unpublished stream ${eventId} due to media disconnect`);
+					}
+
+					// Mark as not live
+					if (stream.isLive) {
+						await prisma.event.update({
+							where: { id: eventId },
+							data: { isLive: false }
+						});
+
+						io.emit("STREAM_ENDED", {
+							eventId,
+							reason: "media_disconnect"
+						});
+					}
+
+					// Remove heartbeat after cleanup
+					streamHeartbeats.delete(eventId);
+				} catch (error) {
+					console.error(`[Stream Lifecycle] Error auto-unpublishing stream ${eventId}:`, error);
+				}
+			}
+		}
+	}
+}
+
+// Run heartbeat check every 5 seconds
+setInterval(checkForDisconnectedMedia, 5000);
+
 // 1. Security & Configuration
 app.use(cors({
 	origin: corsOrigins,

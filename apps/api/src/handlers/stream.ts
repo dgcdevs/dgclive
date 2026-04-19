@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
+import { AuthRequest } from '../middleware/requireAuth';
 import { mux } from '../lib/mux';
 import { prisma } from '../lib/prisma';
 import { notifyAllMembers } from '../lib/notifications';
 import { io } from '../index';
 
 // PHASE 2 & 3: SETUP & HANDSHAKE (Start Broadcast)
-export const startStream = async (req: Request, res: Response) => {
+export const startStream = async (req: AuthRequest, res: Response) => {
     try {
         const { title, description, isPublic, thumbnailUrl, scheduledStartTime } = req.body;
 
@@ -57,21 +58,18 @@ export const startStream = async (req: Request, res: Response) => {
             },
         });
 
-        // Notify all members that a livestream has started
-        try {
-            await notifyAllMembers(
-                'LIVESTREAM_STARTED',
-                `${newEvent.title} is now live!`,
-                'Join the broadcast to watch.',
-                newEvent.id,
-                io
-            );
-        } catch (notifError) {
-            console.error('[Notifications] Failed to notify members of stream start:', notifError);
-            // Don't fail the entire request if notification fails
-        }
+        // Note: Do NOT notify members here! Only notify when stream is explicitly published.
+        // This prevents the auth gate bypass where viewers get notifications before publication.
 
-        // 4. Return the Keys to the Producer Dashboard
+        // 4. Initialize heartbeat tracking for disconnect detection
+        const { streamHeartbeats } = await import('../index');
+        streamHeartbeats.set(newEvent.id, {
+            timestamp: Date.now(),
+            userId: req.user!.id,
+            recoveryEnd: Date.now() + (2 * 60 * 1000) // 2-minute recovery window starts now
+        });
+
+        // 5. Return the Keys to the Producer Dashboard
         res.status(201).json({
             message: "Stream ready",
             streamKey: newEvent.muxStreamKey, // The Producer copies this to OBS
@@ -158,6 +156,32 @@ export const publishStream = async (req: Request, res: Response) => {
             data: { isPublished: true }
         });
 
+        // Broadcast to all viewers that stream is now published
+        io.emit("STREAM_PUBLISHED", {
+            eventId,
+            timestamp: new Date()
+        });
+
+        // NOW notify members that stream is published (auth gate respected)
+        try {
+            await notifyAllMembers(
+                'LIVESTREAM_STARTED',
+                `${stream.title} is now live!`,
+                'Join the broadcast to watch.',
+                eventId,
+                io
+            );
+        } catch (notifError) {
+            console.error('[Notifications] Failed to notify members of stream publication:', notifError);
+        }
+
+        // Update recovery window - stream is now officially published
+        const { streamHeartbeats } = await import('../index');
+        const heartbeat = streamHeartbeats.get(eventId);
+        if (heartbeat) {
+            heartbeat.recoveryEnd = Date.now() + (2 * 60 * 1000); // Reset 2-min recovery window
+        }
+
         res.json({ message: "Stream published successfully", stream });
     } catch (error) {
         console.error("Stream Publish Error:", error);
@@ -179,6 +203,13 @@ export const unpublishStream = async (req: Request, res: Response) => {
         const stream = await prisma.event.update({
             where: { id: eventId },
             data: { isPublished: false }
+        });
+
+        // Broadcast to all viewers that stream is no longer public
+        io.emit("STREAM_UNPUBLISHED", {
+            eventId,
+            timestamp: new Date(),
+            reason: "manual_unpublish"
         });
 
         res.json({ message: "Stream unpublished successfully", stream });
@@ -332,5 +363,55 @@ export const debugStreamStatus = async (req: Request, res: Response) => {
     } catch (error: any) {
         console.error("Debug Stream Status Error:", error);
         res.status(500).json({ error: "Failed to debug stream status", details: error.message });
+    }
+};
+
+// Stream Heartbeat - Sent by media every 5 seconds to prevent auto-disconnect
+// This keeps the stream alive and resets the 2-minute recovery window
+export const streamHeartbeat = async (req: AuthRequest, res: Response) => {
+    try {
+        const { eventId } = req.body;
+
+        if (!eventId) {
+            res.status(400).json({ error: "Event ID is required" });
+            return;
+        }
+
+        // Verify stream exists
+        const stream = await prisma.event.findUnique({
+            where: { id: eventId }
+        });
+
+        if (!stream) {
+            res.status(404).json({ error: "Stream not found" });
+            return;
+        }
+
+        // Update heartbeat timestamp
+        const { streamHeartbeats } = await import('../index');
+        const heartbeat = streamHeartbeats.get(eventId);
+
+        if (heartbeat) {
+            // Update timestamp - media is still active
+            heartbeat.timestamp = Date.now();
+            // Reset recovery window - successful reconnect
+            heartbeat.recoveryEnd = Date.now() + (2 * 60 * 1000);
+        } else {
+            // Create new heartbeat if it doesn't exist (media reconnected)
+            streamHeartbeats.set(eventId, {
+                timestamp: Date.now(),
+                userId: req.user!.id,
+                recoveryEnd: Date.now() + (2 * 60 * 1000)
+            });
+        }
+
+        res.json({ 
+            message: "Heartbeat received",
+            heartbeatAt: new Date(),
+            recoveryWindowEnds: new Date(heartbeat?.recoveryEnd || Date.now() + (2 * 60 * 1000))
+        });
+    } catch (error) {
+        console.error("Stream Heartbeat Error:", error);
+        res.status(500).json({ error: "Failed to process heartbeat" });
     }
 };
