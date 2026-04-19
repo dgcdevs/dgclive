@@ -34,7 +34,7 @@ export const getChatToken = async (req: AuthRequest, res: Response) => {
         try {
             await client.upsertUser({
                 id: req.user.id,
-                name: req.user.name || req.user.email,
+                name: req.user.fullName || req.user.email,
                 image: "", // Could add avatar URL later
             });
         } catch (error) {

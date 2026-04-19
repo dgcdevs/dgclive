@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic'
 import { VideoPlayer } from "../../../components/video-player"
 import { ChatContainer } from "../../../components/chat"
 import { LoadingSpinner } from "../../../components/LoadingSpinner"
+import { useUser } from "@/lib/use-user"
 import { Share2, Check } from "lucide-react"
 import { useEffect, useState, useRef } from "react"
 import { useParams, useSearchParams } from "next/navigation"
@@ -33,6 +34,7 @@ export default function WatchPage() {
     const params = useParams<{ id: string }>()
     const searchParams = useSearchParams()
     const source = searchParams.get("source") === "youtube" ? "youtube" : "mux"
+    const { user } = useUser()
 
     const [video, setVideo] = useState<ArchiveVideo | null>(null)
     const [isLoading, setIsLoading] = useState(true)
@@ -158,6 +160,7 @@ export default function WatchPage() {
                     youtubeId={source === "youtube" ? video.youtubeId : undefined}
                     muxPlaybackId={source === "mux" ? video.muxPlaybackId : undefined}
                     thumbnail={video.thumbnailUrl}
+                    isMedia={user?.role === 'MEDIA' || user?.role === 'ADMIN'}
                 />
 
                 {/* Video Details */}
