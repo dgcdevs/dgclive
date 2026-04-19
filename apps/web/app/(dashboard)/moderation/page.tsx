@@ -18,8 +18,8 @@ export default function ModerationPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-gray-600">Loading...</div>
+      <div className="flex items-center justify-center min-h-screen bg-brand-bg">
+        <div className="text-white/40">Loading...</div>
       </div>
     );
   }
@@ -32,7 +32,7 @@ export default function ModerationPage() {
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Shield className="w-8 h-8 text-blue-600" />
+        <Shield className="w-8 h-8 text-brand-purple" />
         <div>
           <h1 className="text-3xl font-bold text-white">Moderation Dashboard</h1>
           <p className="text-white/60">Manage chat violations and user moderation</p>

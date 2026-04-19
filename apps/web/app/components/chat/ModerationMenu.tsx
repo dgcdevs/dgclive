@@ -71,17 +71,17 @@ export function ModerationMenu({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-lg p-4 w-80 max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
-        <h3 className="font-semibold text-gray-900 mb-4">Moderation Actions for {userName}</h3>
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-brand-card border border-white/10 rounded-lg shadow-xl p-4 w-80 max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-white mb-4">Moderation Actions for {userName}</h3>
 
-        {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
 
         <div className="space-y-2">
           <button
             onClick={handleDeleteMessage}
             disabled={isLoading}
-            className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-400 hover:bg-red-500/10 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Trash2 className="w-4 h-4" />
             <span className="text-sm font-medium">Delete Message</span>
@@ -90,7 +90,7 @@ export function ModerationMenu({
           <button
             onClick={handleMuteUser}
             disabled={isLoading}
-            className="w-full flex items-center gap-2 px-3 py-2 text-left text-yellow-600 hover:bg-yellow-50 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-yellow-400 hover:bg-yellow-500/10 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Volume2 className="w-4 h-4" />
             <span className="text-sm font-medium">Mute User</span>
@@ -99,17 +99,17 @@ export function ModerationMenu({
           <button
             onClick={handleBanUser}
             disabled={isLoading}
-            className="w-full flex items-center gap-2 px-3 py-2 text-left text-orange-600 hover:bg-orange-50 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-left text-brand-purple hover:bg-brand-purple/10 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Ban className="w-4 h-4" />
             <span className="text-sm font-medium">Ban User</span>
           </button>
         </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-200">
+        <div className="mt-4 pt-4 border-t border-white/10">
           <button
             onClick={onClose}
-            className="w-full px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            className="w-full px-3 py-2 text-sm text-white/60 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
           >
             Cancel
           </button>

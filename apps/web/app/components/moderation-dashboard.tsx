@@ -118,13 +118,13 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Shield className="w-6 h-6 text-blue-600" />
-          <h2 className="text-xl font-bold text-gray-900">Chat Moderation</h2>
+          <Shield className="w-6 h-6 text-brand-purple" />
+          <h2 className="text-xl font-bold text-white">Chat Moderation</h2>
         </div>
         <button
           onClick={fetchViolations}
           disabled={isLoading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm font-medium"
+          className="px-4 py-2 bg-brand-purple text-white rounded-lg hover:bg-brand-purple/90 disabled:opacity-50 transition-colors text-sm font-medium"
         >
           {isLoading ? 'Loading...' : 'Refresh'}
         </button>
@@ -132,9 +132,9 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
 
       {/* Error Message */}
       {error && (
-        <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-red-600" />
-          <p className="text-sm text-red-700">{error}</p>
+        <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-red-400" />
+          <p className="text-sm text-red-400">{error}</p>
         </div>
       )}
 
@@ -144,8 +144,8 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
           onClick={() => setFilter('all')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             filter === 'all'
-              ? 'bg-blue-100 text-blue-700 border border-blue-300'
-              : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-150'
+              ? 'bg-brand-purple/20 text-brand-purple border border-brand-purple/40'
+              : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
           }`}
         >
           All Violations ({violations.length})
@@ -154,8 +154,8 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
           onClick={() => setFilter('chat-ban')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             filter === 'chat-ban'
-              ? 'bg-yellow-100 text-yellow-700 border border-yellow-300'
-              : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-150'
+              ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40'
+              : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
           }`}
         >
           Chat Banned ({violations.filter((v) => v.chatBanned).length})
@@ -164,8 +164,8 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
           onClick={() => setFilter('platform-ban')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             filter === 'platform-ban'
-              ? 'bg-red-100 text-red-700 border border-red-300'
-              : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-150'
+              ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+              : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
           }`}
         >
           Platform Banned ({violations.filter((v) => v.isBanned).length})
@@ -173,37 +173,37 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-brand-card rounded-lg border border-white/10 overflow-hidden">
         {filteredViolations.length === 0 ? (
-          <div className="flex items-center justify-center h-64 text-gray-500">
+          <div className="flex items-center justify-center h-64 text-white/40">
             <p>No {filter === 'chat-ban' ? 'chat-banned' : filter === 'platform-ban' ? 'platform-banned' : ''} users</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-white/5 border-b border-white/10">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">User</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Email</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Created</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">User</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">Created</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-white/60 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-white/5">
                 {filteredViolations.map((violation) => (
-                  <tr key={violation.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{violation.fullName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{violation.email}</td>
+                  <tr key={violation.id} className="hover:bg-white/5 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{violation.fullName}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-white/60">{violation.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <span
                         className={`px-2 py-1 rounded text-xs font-medium ${
                           violation.role === 'ADMIN'
-                            ? 'bg-purple-100 text-purple-800'
+                            ? 'bg-brand-purple/30 text-brand-purple'
                             : violation.role === 'MEDIA'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
+                            ? 'bg-blue-500/30 text-blue-300'
+                            : 'bg-white/10 text-white/70'
                         }`}
                       >
                         {violation.role}
@@ -212,14 +212,14 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <div className="flex gap-2">
                         {violation.chatBanned && (
-                          <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800 text-xs font-medium">Chat Ban</span>
+                          <span className="px-2 py-1 rounded bg-yellow-500/30 text-yellow-300 text-xs font-medium">Chat Ban</span>
                         )}
                         {violation.isBanned && (
-                          <span className="px-2 py-1 rounded bg-red-100 text-red-800 text-xs font-medium">Platform Ban</span>
+                          <span className="px-2 py-1 rounded bg-red-500/30 text-red-300 text-xs font-medium">Platform Ban</span>
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-white/60">
                       {new Date(violation.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -227,7 +227,7 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
                         <button
                           onClick={() => handleUnban(violation.id, violation.fullName)}
                           disabled={actionLoading === violation.id}
-                          className="inline-flex items-center gap-1 px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 transition-colors text-xs font-medium"
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-green-600/20 text-green-300 border border-green-500/30 rounded hover:bg-green-600/30 disabled:opacity-50 transition-colors text-xs font-medium"
                         >
                           {actionLoading === violation.id ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -247,9 +247,9 @@ export function ModerationDashboard({ token }: ModerationDashboardProps) {
       </div>
 
       {/* Info Section */}
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <p className="text-sm text-blue-900">
-          <strong>Note:</strong> This dashboard shows users who are banned or muted from chat. Click "Unmute/Unban" to restore their chat privileges. Users can appeal through the support email.
+      <div className="p-4 bg-brand-purple/10 border border-brand-purple/30 rounded-lg">
+        <p className="text-sm text-white/70">
+          <strong className="text-white">Note:</strong> This dashboard shows users who are banned or muted from chat. Click "Unmute/Unban" to restore their chat privileges. Users can appeal through the support email.
         </p>
       </div>
     </div>
