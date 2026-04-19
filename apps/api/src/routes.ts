@@ -7,8 +7,10 @@ import { createInvite } from './handlers/invite';
 import { requireAuth, requireAdmin, requireMediaOrAdmin } from './middleware/requireAuth';
 import { banUser, getUsers, getInvites, updateUserRole, syncYouTubeVideos, setupMasterStream } from './handlers/admin';
 import { getLiveStream, getArchives, getVideoById } from './handlers/content';
-import { sendMessage, getMessages } from './handlers/chat';
+import { sendMessage, getMessages, deleteMessage, muteUser, unmuteUser, banUserFromChat, postAnnouncement } from './handlers/chat';
+import { getChatToken, getChatChannels } from './handlers/chatToken';
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './handlers/notifications';
+import { getBannedUsers, unbanUser, getChatViolations } from './handlers/moderation';
 
 const router = Router();
 
@@ -19,6 +21,10 @@ router.post("/login", login);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.get("/me", requireAuth, getMe);
+
+// Chat Authentication
+router.post("/chat/token", requireAuth, getChatToken);
+router.get("/chat/channels", requireAuth, getChatChannels);
 
 
 // ==========================================
@@ -31,7 +37,17 @@ router.get('/stream/debug', requireAuth, requireMediaOrAdmin, debugStreamStatus)
 router.get('/stream/:id', requireAuth, getVideoById);
 router.post('/chat', requireAuth, sendMessage);
 router.get('/chat/:eventId', requireAuth, getMessages);
+router.delete('/chat/:messageId/delete', requireAuth, requireMediaOrAdmin, deleteMessage);
+router.post('/chat/users/:userId/mute', requireAuth, requireMediaOrAdmin, muteUser);
+router.post('/chat/users/:userId/unmute', requireAuth, requireMediaOrAdmin, unmuteUser);
+router.post('/chat/users/:userId/ban', requireAuth, requireMediaOrAdmin, banUserFromChat);
+router.post('/chat/announcement', requireAuth, requireMediaOrAdmin, postAnnouncement);
 router.get('/archive', requireAuth, getArchives);
+
+// Moderation (Chat violations management)
+router.get('/moderation/violations', requireAuth, requireMediaOrAdmin, getChatViolations);
+router.get('/moderation/bans', requireAuth, requireMediaOrAdmin, getBannedUsers);
+router.post('/moderation/unban/:userId', requireAuth, requireMediaOrAdmin, unbanUser);
 
 // Notifications
 router.get('/notifications', requireAuth, getNotifications);

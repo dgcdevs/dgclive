@@ -12,7 +12,7 @@ const corsOrigins = process.env.CORS_ORIGINS
 	: ['http://localhost:3000'];
 
 const httpServer = createServer(app);
-const io = new SocketIOServer(httpServer, {
+export const io = new SocketIOServer(httpServer, {
 	cors: {
 		origin: corsOrigins,
 		credentials: true,
@@ -77,6 +77,3 @@ httpServer.listen(port, () => {
 	console.log(`🚀 API running on http://localhost:${port}`);
 	console.log(`📡 Socket.io ready at http://localhost:${port}/socket.io/`);
 });
-
-// Export io for use in handlers
-export { io };
