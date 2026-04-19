@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/requireAuth";
 import { StreamChat } from "stream-chat";
+import { prisma } from "../lib/prisma";
 
 /**
  * Generate a Stream Chat authentication token for the current user.
@@ -29,14 +30,22 @@ export const getChatToken = async (req: AuthRequest, res: Response) => {
         // Generate token for this user (24 hour expiration)
         const token = client.createToken(req.user.id);
 
-        // Optionally, create/update user on Stream Chat side
-        // This ensures the user exists in Stream Chat's system
+        // Fetch user's role from database
+        const profile = await prisma.profile.findUnique({
+            where: { id: req.user.id },
+        });
+
+        const userRole = profile?.role || 'MEMBER';
+
+        // Create/update user on Stream Chat side with role information
+        // This ensures Stream Chat knows the user's permissions
         try {
             await client.upsertUser({
                 id: req.user.id,
                 name: req.user.fullName || req.user.email,
                 image: "", // Could add avatar URL later
-            });
+                role: userRole.toLowerCase(), // Stream Chat expects role to be set
+            } as any);
         } catch (error) {
             // Log but don't fail if upsert fails (user might already exist)
             console.warn("Failed to upsert Stream Chat user:", error);

@@ -158,7 +158,7 @@ export function ChatContainer({ eventId, isLive }: ChatContainerProps) {
 
       {isModerationLoading && (
         <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
-          <div className="bg-slate-800 px-4 py-2 rounded-lg text-sm text-white/70 border border-white/10">Processing...</div>
+          <div className="bg-brand-bg px-4 py-2 rounded-lg text-sm text-white/70 border border-white/10">Processing...</div>
         </div>
       )}
     </div>

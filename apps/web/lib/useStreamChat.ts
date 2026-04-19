@@ -121,7 +121,11 @@ export function useStreamChat(eventId: string | null | undefined): UseStreamChat
         // Create Stream Chat client
         const streamClient = new StreamChat(apiKey);
         await streamClient.connectUser(
-          { id: user.id, name: user.fullName || user.email || 'Anonymous', image: user.avatar },
+          {
+            id: user.id,
+            name: user.fullName || user.email || 'Anonymous',
+            image: user.avatar,
+          } as any,
           token
         );
 
