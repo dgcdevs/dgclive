@@ -429,6 +429,34 @@ export default function ControlRoomPage() {
         }
     }, [eventId]);
 
+    // ========================================
+    // HEARTBEAT: Send media alive signal every 5 seconds
+    // ========================================
+    // This prevents auto-disconnect and resets the recovery window
+    useEffect(() => {
+        if (!isPublished || !eventId) return;
+
+        const sendHeartbeat = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/heartbeat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ eventId })
+                });
+                console.log('[Heartbeat] Sent for stream:', eventId);
+            } catch (err) {
+                console.error('[Heartbeat] Error:', err);
+            }
+        };
+
+        // Send immediately, then every 5 seconds
+        sendHeartbeat();
+        const heartbeatInterval = setInterval(sendHeartbeat, 5000);
+
+        return () => clearInterval(heartbeatInterval);
+    }, [isPublished, eventId]);
+
     const handleStreamSettingUpdate = async (setting: { chatEnabled?: boolean, slowMode?: boolean }) => {
         if (!eventId) return;
         if (setting.chatEnabled !== undefined) setChatEnabled(setting.chatEnabled);
