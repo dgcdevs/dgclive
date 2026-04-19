@@ -82,7 +82,7 @@ export function Navbar() {
                             <Link
                                 href="/moderation"
                                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all ${isActive("/moderation")
-                                    ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                                    ? "bg-brand-purple text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
                                     : "text-white/60 hover:text-white hover:bg-white/5"
                                     }`}
                             >

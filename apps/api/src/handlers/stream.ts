@@ -16,6 +16,50 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             return;
         }
 
+        // 1.5. CHECK FOR EXISTING INACTIVE EVENT (Reuse stream key if stopped)
+        // This allows media to stop/start without reconfiguring OBS
+        const existingEvent = await prisma.event.findFirst({
+            where: {
+                isLive: false, // Not currently live
+                isPublished: false, // Not published to viewers
+                muxStreamKey: { not: null } // Has valid stream key
+            },
+            orderBy: { startTime: 'desc' } // Get most recent
+        });
+
+        // If we found a recent inactive event, reuse it
+        if (existingEvent && existingEvent.muxStreamKey && existingEvent.muxPlaybackId) {
+            console.log(`[Stream Reuse] Reusing existing stream ${existingEvent.id} - same keys`);
+            
+            const updatedEvent = await prisma.event.update({
+                where: { id: existingEvent.id },
+                data: {
+                    isLive: true,
+                    title, // Update title if provided
+                    ...(description && { description }),
+                    ...(thumbnailUrl && { thumbnailUrl }),
+                    startTime: scheduledStartTime ? new Date(scheduledStartTime) : new Date()
+                }
+            });
+
+            // Initialize heartbeat tracking for disconnect detection
+            const { streamHeartbeats } = await import('../index');
+            streamHeartbeats.set(updatedEvent.id, {
+                timestamp: Date.now(),
+                userId: req.user!.id,
+                recoveryEnd: Date.now() + (2 * 60 * 1000)
+            });
+
+            return res.status(201).json({
+                message: "Stream reused (same key)",
+                streamKey: updatedEvent.muxStreamKey,
+                playbackId: updatedEvent.muxPlaybackId,
+                eventId: updatedEvent.id,
+                reused: true
+            });
+        }
+
+        // Otherwise, create a new stream
         let liveStream: any;
 
         try {
@@ -74,7 +118,8 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             message: "Stream ready",
             streamKey: newEvent.muxStreamKey, // The Producer copies this to OBS
             playbackId: newEvent.muxPlaybackId, // Used for the Preview Player
-            eventId: newEvent.id
+            eventId: newEvent.id,
+            reused: false
         });
 
     } catch (error: any) {
@@ -94,9 +139,24 @@ export const stopStream = async (req: Request, res: Response) => {
         }
 
         // 1. Update Database: "Show's Over"
+        // - Clear stream key for new session on next start
+        // - Unpublish so viewers can't see this stream anymore
+        // - Mark as not live
         const stream = await prisma.event.update({
             where: { id: eventId },
-            data: { isLive: false } // This tells the Frontend to stop showing "LIVE" badge
+            data: { 
+                isLive: false, // Stops showing "LIVE" badge
+                isPublished: false, // Hide stream from viewers (end the session)
+                muxStreamKey: null // Clear stream key - next start will generate a NEW key
+            }
+        });
+
+        // 2. Broadcast STREAM_ENDED to all viewers
+        // This notifies watchers that the stream has ended
+        io.emit("STREAM_ENDED", {
+            eventId,
+            reason: "media_stop",
+            message: "Stream has ended"
         });
 
         // (Optional) Complete the Mux asset (Mark as finished)
@@ -105,7 +165,15 @@ export const stopStream = async (req: Request, res: Response) => {
             // but Mux usually detects the OBS disconnect automatically.
         }
 
-        res.json({ message: "Broadcast ended successfully", stream });
+        // 3. Clean up heartbeat tracking for this event
+        const { streamHeartbeats } = await import('../index');
+        streamHeartbeats.delete(eventId);
+
+        res.json({ 
+            message: "Broadcast ended successfully", 
+            stream,
+            note: "When you start again, a NEW stream will be created with a NEW stream key. Next start will trigger a new event."
+        });
 
     } catch (error) {
         console.error("Stream Stop Error:", error);

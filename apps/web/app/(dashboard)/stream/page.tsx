@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Copy, Check, Clock, Video, MessageSquare, Heart, Settings, Wifi, WifiOff, ChevronDown } from "lucide-react"
 import { useUser } from "../../../lib/use-user"
-import { LiveChat } from "../../components/live-chat"
+import { ChatContainer } from "../../components/chat"
 import { Toast, useToast } from "../../components/ui/toast"
 import { LoadingSpinner } from "../../components/LoadingSpinner"
 import { InlineErrorMessage } from "../../components/InlineErrorMessage"
@@ -783,46 +783,26 @@ export default function ControlRoomPage() {
                                 )}
                             </div>
 
-                            {/* ── LAYER 4: Go Live / Stop button (bottom-center) ── */}
-                            {isLive && obsStatus === 'live' && (
+                            {/* ── LAYER 4: Go Live button (bottom-center) ── */}
+                            {isLive && obsStatus === 'live' && !isPublished && (
                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
-                                    {!isPublished ? (
-                                        <button
-                                            onClick={handlePublish}
-                                            disabled={isPublishing}
-                                            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-[0_0_30px_rgba(239,68,68,0.5)] hover:shadow-[0_0_40px_rgba(239,68,68,0.7)] transition-all animate-pulse hover:animate-none"
-                                        >
-                                            {isPublishing ? (
-                                                <>
-                                                    <LoadingSpinner size="sm" />
-                                                    Publishing...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <span className="h-2.5 w-2.5 rounded-full bg-white" />
-                                                    Go Live to Public
-                                                </>
-                                            )}
-                                        </button>
-                                    ) : (
-                                        <button
-                                            onClick={handleUnpublish}
-                                            disabled={isPublishing}
-                                            className="flex items-center gap-2.5 bg-zinc-800 hover:bg-zinc-700 border border-white/20 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg"
-                                        >
-                                            {isPublishing ? (
-                                                <>
-                                                    <LoadingSpinner size="sm" />
-                                                    Updating...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <span className="h-2.5 w-2.5 rounded-full bg-red-500 border border-red-200" />
-                                                    Stop Public Stream
-                                                </>
-                                            )}
-                                        </button>
-                                    )}
+                                    <button
+                                        onClick={handlePublish}
+                                        disabled={isPublishing}
+                                        className="flex items-center gap-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-[0_0_30px_rgba(239,68,68,0.5)] hover:shadow-[0_0_40px_rgba(239,68,68,0.7)] transition-all animate-pulse hover:animate-none"
+                                    >
+                                        {isPublishing ? (
+                                            <>
+                                                <LoadingSpinner size="sm" />
+                                                Publishing...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="h-2.5 w-2.5 rounded-full bg-white" />
+                                                Go Live to Public
+                                            </>
+                                        )}
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -904,7 +884,13 @@ export default function ControlRoomPage() {
                     <div className="flex-1 overflow-hidden flex flex-col">
                         {activeSidebarTab === 'chat' && (
                             <div className="flex-1 flex flex-col min-h-0 bg-black/10">
-                                <LiveChat />
+                                {eventId ? (
+                                    <ChatContainer eventId={eventId} isLive={isLive && isPublished} />
+                                ) : (
+                                    <div className="flex-1 flex items-center justify-center text-white/50">
+                                        <p>Start streaming to see chat</p>
+                                    </div>
+                                )}
                             </div>
                         )}
 

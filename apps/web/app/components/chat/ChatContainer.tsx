@@ -103,7 +103,7 @@ export function ChatContainer({ eventId, isLive }: ChatContainerProps) {
   // Chat is disabled when stream is not live
   if (!isLive) {
     return (
-      <div className="flex flex-col gap-4 p-6 bg-slate-900 rounded-lg border border-white/10 h-full">
+      <div className="flex flex-col gap-4 p-6 bg-brand-bg rounded-lg border border-white/10 h-full">
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <p className="text-white/80 font-semibold">Chat is only available during livestreams</p>
@@ -117,7 +117,7 @@ export function ChatContainer({ eventId, isLive }: ChatContainerProps) {
   // Loading state
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-4 p-6 bg-slate-900 rounded-lg border border-white/10 h-full">
+      <div className="flex flex-col gap-4 p-6 bg-brand-bg rounded-lg border border-white/10 h-full">
         <div className="flex-1 flex items-center justify-center">
           <div className="text-white/50">Loading chat...</div>
         </div>
@@ -128,7 +128,7 @@ export function ChatContainer({ eventId, isLive }: ChatContainerProps) {
   // Before joining
   if (!isJoined) {
     return (
-      <div className="flex flex-col gap-4 p-6 bg-slate-900 rounded-lg border border-white/10 h-full">
+      <div className="flex flex-col gap-4 p-6 bg-brand-bg rounded-lg border border-white/10 h-full">
         <div className="flex-1 flex items-center justify-center">
           <ChatJoinPrompt onJoin={joinChat} isLoading={isLoading} error={error} />
         </div>
@@ -138,7 +138,7 @@ export function ChatContainer({ eventId, isLive }: ChatContainerProps) {
 
   // Chat interface (joined)
   return (
-    <div className="flex flex-col gap-4 bg-slate-900 rounded-lg border border-white/10 h-full">
+    <div className="flex flex-col gap-4 bg-brand-bg rounded-lg border border-white/10 h-full">
       <div className="flex-1 min-h-0">
         <ChatMessageList
           channel={channel}
@@ -158,7 +158,7 @@ export function ChatContainer({ eventId, isLive }: ChatContainerProps) {
 
       {isModerationLoading && (
         <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
-          <div className="bg-slate-800 px-4 py-2 rounded-lg text-sm text-white/70 border border-white/10">Processing...</div>
+          <div className="bg-brand-bg px-4 py-2 rounded-lg text-sm text-white/70 border border-white/10">Processing...</div>
         </div>
       )}
     </div>

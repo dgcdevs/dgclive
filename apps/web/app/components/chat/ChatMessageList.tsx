@@ -110,7 +110,7 @@ export function ChatMessageList({
   }
 
   return (
-    <div className="flex flex-col h-96 bg-slate-900 rounded-lg border border-white/10">
+    <div className="flex flex-col h-96 bg-brand-bg rounded-lg border border-white/10">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-white/50">
