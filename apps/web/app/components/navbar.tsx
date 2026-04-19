@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Logo } from "./logo"
-import { Search, Bell, Calendar, User, Home, LayoutDashboard, Video, LogOut } from "lucide-react"
+import { Search, Bell, Calendar, User, Home, LayoutDashboard, Video, LogOut, Shield } from "lucide-react"
 import { NotificationDropdown } from "./notification-dropdown"
 
 import { useUser } from "../../lib/use-user"
@@ -75,6 +75,19 @@ export function Navbar() {
                             >
                                 <LayoutDashboard className={`h-4 w-4 ${isActive("/dashboard") ? "fill-white text-white" : ""}`} />
                                 Dashboard
+                            </Link>
+                        )}
+
+                        {canAccessMedia && (
+                            <Link
+                                href="/moderation"
+                                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all ${isActive("/moderation")
+                                    ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                                    : "text-white/60 hover:text-white hover:bg-white/5"
+                                    }`}
+                            >
+                                <Shield className={`h-4 w-4 ${isActive("/moderation") ? "fill-white text-white" : ""}`} />
+                                Moderation
                             </Link>
                         )}
                     </div>

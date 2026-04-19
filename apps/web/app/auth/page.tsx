@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { Button } from "../components/ui/button"
@@ -9,15 +9,25 @@ import { Label } from "../components/ui/label"
 import { Logo } from "../components/logo"
 import { Check, Mail, Lock, Eye, EyeOff, User, AlertCircle } from "lucide-react"
 import BokehDots from "../components/BokehDots"
+import { useAuth } from "../../lib/useAuth"
 
 type SignupStep = "form" | "verification" | "error"
 type ForgotPasswordStep = "email" | "code" | null
 
 export default function AuthPage() {
+	const router = useRouter()
+	const { token } = useAuth()
+
+	// Redirect authenticated users to dashboard
+	useEffect(() => {
+		if (token) {
+			router.push("/dashboard")
+		}
+	}, [token, router])
+
 	const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin")
 	const [signupStep, setSignupStep] = useState<SignupStep>("form")
 	const [forgotPasswordStep, setForgotPasswordStep] = useState<ForgotPasswordStep>(null)
-	const router = useRouter()
 	const [isLoading, setIsLoading] = useState(false)
 	const [showPassword, setShowPassword] = useState(false)
 	const [showConfirmPassword, setShowConfirmPassword] = useState(false)

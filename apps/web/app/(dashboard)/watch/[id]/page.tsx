@@ -4,17 +4,14 @@
 export const dynamic = 'force-dynamic'
 
 import { VideoPlayer } from "../../../components/video-player"
-import { LiveChat } from "../../../components/live-chat"
+import { ChatContainer } from "../../../components/chat"
 import { LoadingSpinner } from "../../../components/LoadingSpinner"
-import { Share2, Heart, Hand, Zap, Sparkles, Check } from "lucide-react"
+import { Share2, Check } from "lucide-react"
 import { useEffect, useState, useRef } from "react"
 import { useParams, useSearchParams } from "next/navigation"
 import Image from "next/image"
 import LogoImage from "@/assets/images/dgclivelogo.png"
-import { useAuth } from "@/lib/useAuth"
 import { io, Socket } from "socket.io-client"
-
-type ReactionType = "LIKE" | "PRAISE" | "FIRE" | "PRAYING"
 
 type ArchiveVideo = {
     id: string
@@ -41,15 +38,11 @@ export default function WatchPage() {
     const [isLoading, setIsLoading] = useState(true)
     const [errorMessage, setErrorMessage] = useState("")
     const [isCopied, setIsCopied] = useState(false)
-    const [reactionCounts, setReactionCounts] = useState<Record<ReactionType, number>>({ LIKE: 0, PRAISE: 0, FIRE: 0, PRAYING: 0 })
-    const [userReactions, setUserReactions] = useState<ReactionType[]>([])
 
     // Live stream state
     const [isLive, setIsLive] = useState(false)
     const [isPublished, setIsPublished] = useState(false)
     const socketRef = useRef<Socket | null>(null)
-
-    const { token } = useAuth()
 
     const handleShare = async () => {
         try {
@@ -147,65 +140,6 @@ export default function WatchPage() {
         };
     }, [video, source]);
 
-    useEffect(() => {
-        if (!video || !token) return;
-
-        const fetchReactions = async () => {
-            try {
-                const id = source === "youtube" ? video.youtubeId : video.id;
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${id}/reactions?source=${source}`, {
-                    headers: { "Authorization": `Bearer ${token}` }
-                })
-                if (res.ok) {
-                    const data = await res.json()
-                    setReactionCounts(data.counts)
-                    setUserReactions(data.userReactions)
-                }
-            } catch (err) {
-                console.error("Failed to fetch reactions", err)
-            }
-        }
-
-        fetchReactions()
-    }, [video, source, token])
-
-    const handleReaction = async (type: ReactionType) => {
-        if (!token || !video) return
-
-        // Optimistic UI Update
-        const hasReacted = userReactions.includes(type)
-        setUserReactions(prev => hasReacted ? prev.filter(r => r !== type) : [...prev, type])
-        setReactionCounts(prev => ({
-            ...prev,
-            [type]: Math.max(0, prev[type] + (hasReacted ? -1 : 1))
-        }))
-
-        try {
-            const id = source === "youtube" ? video.youtubeId : video.id
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${id}/reaction?source=${source}`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify({ type })
-            })
-
-            if (!res.ok) {
-                // Revert if failed
-                throw new Error("API response bad")
-            }
-        } catch (err) {
-            console.error("Failed to toggle reaction", err)
-            // Revert on catch
-            setUserReactions(prev => hasReacted ? [...prev, type] : prev.filter(r => r !== type))
-            setReactionCounts(prev => ({
-                ...prev,
-                [type]: Math.max(0, prev[type] + (hasReacted ? 1 : -1))
-            }))
-        }
-    }
-
     if (isLoading) {
         return <div className="flex items-center justify-center min-h-screen"><LoadingSpinner size="lg" message="Loading video..." /></div>
     }
@@ -257,60 +191,13 @@ export default function WatchPage() {
                     <p className="text-sm text-white/60 leading-relaxed max-w-2xl">
                         {video.description || "Enjoy this past sermon from Davidic Generation Church."}
                     </p>
-
-                    {/* Interaction Buttons */}
-                    <div className="flex flex-wrap gap-3">
-                        <InteractionButton
-                            icon={Heart} label="Like" color="text-red-500"
-                            count={reactionCounts.LIKE} isActive={userReactions.includes("LIKE")}
-                            onClick={() => handleReaction("LIKE")}
-                        />
-                        <InteractionButton
-                            icon={Hand} label="Praise" color="text-yellow-500"
-                            count={reactionCounts.PRAISE} isActive={userReactions.includes("PRAISE")}
-                            onClick={() => handleReaction("PRAISE")}
-                        />
-                        <InteractionButton
-                            icon={Zap} label="Fire" color="text-orange-500"
-                            count={reactionCounts.FIRE} isActive={userReactions.includes("FIRE")}
-                            onClick={() => handleReaction("FIRE")}
-                        />
-                        <InteractionButton
-                            icon={Sparkles} label="Praying" color="text-purple-500"
-                            count={reactionCounts.PRAYING} isActive={userReactions.includes("PRAYING")}
-                            onClick={() => handleReaction("PRAYING")}
-                        />
-                    </div>
                 </div>
             </div>
 
-            {/* Right Column: Live Chat & Comments */}
+            {/* Right Column: Chat */}
             <div className="lg:col-span-1 h-[calc(100vh-120px)] sticky top-24">
-                <LiveChat />
+                <ChatContainer isLive={isLive} eventId={video.id} />
             </div>
         </div>
-    )
-}
-
-function InteractionButton({
-    icon: Icon, label, count, color, isActive, onClick
-}: {
-    icon: any, label: string, count: number, color: string, isActive: boolean, onClick: () => void
-}) {
-    return (
-        <button
-            onClick={onClick}
-            className={`group flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-all
-                ${isActive ? 'bg-white/10 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:border-white/20'}
-            `}
-        >
-            <Icon className={`h-4 w-4 transition-transform group-hover:scale-110 ${isActive ? color : 'text-white/60 group-hover:' + color}`} />
-            <span className="font-medium">{label}</span>
-            <span className={`ml-1 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white transition-colors
-                ${isActive ? 'bg-brand-purple' : 'bg-white/10 group-hover:bg-brand-purple/70'}
-            `}>
-                {count}
-            </span>
-        </button>
     )
 }

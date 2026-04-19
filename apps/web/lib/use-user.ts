@@ -7,6 +7,8 @@ export interface User {
     email: string;
     fullName: string;
     role: Role;
+    isBanned: boolean;
+    chatBanned?: boolean;
     [key: string]: any;
 }
 
