@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 export const getBannedUsers = async (req: any, res: Response) => {
     try {
         const bannedUsers = await prisma.profile.findMany({
-            where: { chatBanned: true },
+            // Removed chatBanned check - using ChatRoomMute model instead
             select: {
                 id: true,
                 fullName: true,
@@ -29,10 +29,10 @@ export const unbanUser = async (req: any, res: Response) => {
             return res.status(400).json({ error: 'userId required' });
         }
 
-        // Unban user
+        // Unban user from platform
         const updatedUser = await prisma.profile.update({
             where: { id: userId },
-            data: { chatBanned: false },
+            data: { isBanned: false },
         });
 
         console.log(`[MODERATION] User ${userId} unbanned by ${req.user.id}`);
@@ -47,20 +47,22 @@ export const unbanUser = async (req: any, res: Response) => {
 export const unmuteUser = async (req: any, res: Response) => {
     try {
         const { userId } = req.params;
+        const { eventId } = req.body;
 
         if (!userId) {
             return res.status(400).json({ error: 'userId required' });
         }
 
-        // Unmute user
-        const updatedUser = await prisma.profile.update({
-            where: { id: userId },
-            data: { chatBanned: false },
+        const roomKey = eventId ? `event-${eventId}` : 'global-chat';
+
+        // Remove mute using ChatRoomMute model
+        const result = await prisma.chatRoomMute.deleteMany({
+            where: { profileId: userId, roomKey }
         });
 
         console.log(`[MODERATION] User ${userId} unmuted by ${req.user.id}`);
 
-        res.status(200).json({ message: 'User unmuted successfully', user: updatedUser });
+        res.status(200).json({ message: 'User unmuted successfully', deletedCount: result.count });
     } catch (error) {
         console.error('Unmute user error:', error);
         res.status(500).json({ error: 'Failed to unmute user' });
@@ -71,14 +73,14 @@ export const getChatViolations = async (req: any, res: Response) => {
     try {
         const violations = await prisma.profile.findMany({
             where: {
-                OR: [{ chatBanned: true }, { isBanned: true }],
+                isBanned: true,
             },
             select: {
                 id: true,
                 fullName: true,
                 email: true,
                 role: true,
-                chatBanned: true,
+
                 isBanned: true,
                 createdAt: true,
             },

@@ -172,6 +172,8 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
     try {
         const { forceFullSync } = req.body ?? {};
 
+        console.log(`[YouTube Sync] Starting... (forceFullSync: ${!!forceFullSync})`);
+
         const latestVideo = await prisma.youTubeVideo.findFirst({
             orderBy: { publishedAt: 'desc' },
             select: { publishedAt: true }
@@ -180,6 +182,9 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
         const publishedAfter = forceFullSync
             ? undefined
             : latestVideo?.publishedAt?.toISOString();
+
+        console.log(`[YouTube Sync] Latest video in DB: ${latestVideo?.publishedAt || 'none'}`);
+        console.log(`[YouTube Sync] Fetching videos published after: ${publishedAfter || 'beginning of time'}`);
 
         let pageToken: string | undefined = undefined;
         let added = 0;
@@ -192,6 +197,8 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
                 maxResults: 25,
                 publishedAfter
             });
+
+            console.log(`[YouTube Sync] Got ${videos.length} videos in this batch`);
 
             for (const video of videos) {
                 total += 1;
@@ -228,8 +235,10 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
 
                 if (exists) {
                     updated += 1;
+                    console.log(`[YouTube Sync] Updated: "${video.title}"`);
                 } else {
                     added += 1;
+                    console.log(`[YouTube Sync] Added new: "${video.title}" (${video.durationSeconds}s, ${video.viewCount} views)`);
                     // Notify all members about the new video
                     try {
                         // Get all users to notify
@@ -256,6 +265,8 @@ export const syncYouTubeVideos = async (req: Request, res: Response) => {
 
             pageToken = nextPageToken;
         } while (pageToken);
+
+        console.log(`[YouTube Sync] Completed: Added ${added}, Updated ${updated}, Total processed: ${total}`);
 
         res.json({
             success: true,

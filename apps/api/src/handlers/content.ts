@@ -212,6 +212,8 @@ const loadDiscoveryItems = async (): Promise<DiscoveryItem[]> => {
   const eventSelect: any = await buildCompatibleEventSelect();
   const supportsIsPublished = await eventHasColumn('isPublished');
 
+  console.log(`[loadDiscoveryItems] supportsIsPublished: ${supportsIsPublished}`);
+
   const [muxArchives, youtubeArchives] = await Promise.all<any>([
     prisma.event.findMany({
       where: {
@@ -228,6 +230,8 @@ const loadDiscoveryItems = async (): Promise<DiscoveryItem[]> => {
       take: 250
     })
   ]);
+
+  console.log(`[loadDiscoveryItems] Found ${muxArchives.length} Mux archives and ${youtubeArchives.length} YouTube videos`);
 
   return [
     ...muxArchives.map((event: any) =>
@@ -768,12 +772,16 @@ export const getScheduledServices = async (req: AuthRequest, res: Response) => {
 
 export const getDashboardHome = async (req: AuthRequest, res: Response) => {
   try {
+    console.log('[getDashboardHome] Starting...');
+    
     const [liveEvent, scheduledServices, discovery] = await Promise.all([
       getPublicLiveEvent(),
       loadScheduledServicesData(),
       loadDiscoveryItems()
     ]);
 
+    console.log(`[getDashboardHome] Got ${discovery.length} discovery items`);
+    
     const newest = sortDiscoveryItems(discovery, 'newest');
 
     res.json({

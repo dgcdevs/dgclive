@@ -174,9 +174,12 @@ export default function AuthPage() {
 			// Dispatch event to notify AuthContext of token update
 			if (typeof window !== "undefined") {
 				window.dispatchEvent(new Event("auth:token-updated"))
+				
+				// Wait a moment for AuthContext to re-bootstrap before redirecting
+				setTimeout(() => {
+					router.push("/dashboard")
+				}, 200)
 			}
-			
-			router.push("/dashboard")
 		} catch (err: unknown) {
 			const errorMessage = err instanceof Error ? err.message : "Authentication failed"
 			setErrorMessage(errorMessage)

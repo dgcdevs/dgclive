@@ -56,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (nextToken.split(".").length !== 3) {
+            console.warn("[Auth] Invalid token format")
             signOut()
             return
         }
@@ -65,24 +66,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(optimisticUser)
         }
 
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/me`, {
-            headers: {
-                Authorization: `Bearer ${nextToken}`
-            }
-        })
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/me`, {
+                headers: {
+                    Authorization: `Bearer ${nextToken}`
+                }
+            })
 
-        if (!res.ok) {
-            if (res.status === 401 || res.status === 403) {
-                // Token is invalid or expired - clear it
-                signOut()
+            if (!res.ok) {
+                console.error(`[Auth] /me endpoint failed with status ${res.status}`)
+                if (res.status === 401 || res.status === 403) {
+                    // Token is invalid or expired - clear it
+                    signOut()
+                }
+                throw new Error("Session invalid")
             }
-            throw new Error("Session invalid")
-        }
 
-        const data = await res.json()
-        if (data.user) {
-            setUser(data.user)
-            localStorage.setItem("user", JSON.stringify(data.user))
+            const data = await res.json()
+            if (data.user) {
+                setUser(data.user)
+                localStorage.setItem("user", JSON.stringify(data.user))
+            } else {
+                console.warn("[Auth] /me endpoint returned no user data")
+            }
+        } catch (err) {
+            console.error("[Auth] refreshUser fetch error:", err)
+            throw err
         }
     }, [signOut])
 
@@ -112,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 await refreshUser()
             } catch (error) {
                 if (!cancelled && (error as Error).message !== "Session invalid") {
-                    console.error("Session revalidation failed:", error)
+                    console.error("[Auth] Session revalidation failed:", error)
                 }
             } finally {
                 if (!cancelled) {
@@ -126,6 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Listen for custom token-updated event (fired when login stores token)
         const handleTokenUpdated = () => {
             console.log("[Auth] Token updated event received, re-bootstrapping...")
+            setLoading(true)
             void bootstrap()
         }
 
