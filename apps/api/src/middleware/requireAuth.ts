@@ -44,6 +44,16 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
 		// 1. Verify Token with Supabase
 		const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 		if (error) {
+			// Debug: decode token payload to see expiration
+			try {
+				const parts = token.split('.');
+				if (parts.length === 3) {
+					const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+					console.error(`Token details - exp: ${payload.exp}, iat: ${payload.iat}, current time: ${Math.floor(Date.now() / 1000)}`);
+				}
+			} catch (e) {
+				console.error("Could not decode token:", e);
+			}
 			console.warn(`Supabase Auth rejected token: ${error.message}`);
 			return res.status(401).json({ error: "Invalid Token", details: error.message });
 		}
