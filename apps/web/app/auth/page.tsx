@@ -170,6 +170,12 @@ export default function AuthPage() {
 			
 			localStorage.setItem("token", data.token)
 			localStorage.setItem("user", JSON.stringify(data.user))
+			
+			// Dispatch event to notify AuthContext of token update
+			if (typeof window !== "undefined") {
+				window.dispatchEvent(new Event("auth:token-updated"))
+			}
+			
 			router.push("/dashboard")
 		} catch (err: unknown) {
 			const errorMessage = err instanceof Error ? err.message : "Authentication failed"
