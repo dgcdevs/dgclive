@@ -125,9 +125,16 @@ export default function ControlRoomPage() {
             .then(res => res.json())
             .then(data => {
                 setEncoderConnected(data.isConnected || false);
+                if (data.playbackId) {
+                    setPlaybackId(data.playbackId);
+                }
                 // Update obsStatus to 'live' when encoder is detected
                 if (data.isConnected) {
+                    setIsLive(true);
+                    setLifecycleStage(data.lifecycleStage ?? 'live');
                     setObsStatus('live');
+                } else if (data.lifecycleStage === 'ready') {
+                    setObsStatus('connecting');
                 }
                 console.log('[Encoder Status]', data);
             })
@@ -443,6 +450,42 @@ export default function ControlRoomPage() {
         const interval = setInterval(fetchStats, 10000);
         return () => clearInterval(interval);
     }, [eventId]);
+
+    useEffect(() => {
+        if (!eventId) {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+            return;
+        }
+
+        if (obsStatus === 'live' && isLive) {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+            return;
+        }
+
+        checkEncoderStatus.current();
+
+        if (encoderStatusIntervalRef.current) {
+            clearInterval(encoderStatusIntervalRef.current);
+        }
+
+        // Poll the lightweight status endpoint aggressively while waiting for OBS/Mux handshake.
+        encoderStatusIntervalRef.current = setInterval(() => {
+            checkEncoderStatus.current();
+        }, 3000);
+
+        return () => {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+        };
+    }, [eventId, obsStatus, isLive]);
 
     // Auto-trigger diagnostic modal if a critical error is detected
     useEffect(() => {
