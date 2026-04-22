@@ -26,6 +26,15 @@ const parseOptionalDuration = (value: unknown) => {
     return Math.min(Math.max(Math.round(parsed), 1), 24 * 60);
 };
 
+const parsePositiveInt = (value: unknown, fallback: number, max: number) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+
+    return Math.min(Math.round(parsed), max);
+};
+
 const resolveRoomTarget = async (input: {
     eventId?: unknown;
     youtubeVideoId?: unknown;
@@ -227,6 +236,8 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
 export const getMessages = async (req: AuthRequest, res: Response) => {
     const eventId = typeof req.params.eventId === 'string' ? req.params.eventId : undefined;
     const youtubeVideoId = typeof req.query.youtubeVideoId === 'string' ? req.query.youtubeVideoId : undefined;
+    const limit = parsePositiveInt(req.query.limit, 50, 100);
+    const before = parseString(req.query.before);
 
     try {
         const target = await resolveRoomTarget({ eventId, youtubeVideoId });
@@ -239,9 +250,11 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
         const messages = await prisma.chatMessage.findMany({
             where: {
                 roomKey: target.roomKey,
-                ...(isModerator(req.user?.role) ? {} : { moderationStatus: { not: 'REMOVED' } })
+                ...(isModerator(req.user?.role) ? {} : { moderationStatus: { not: 'REMOVED' } }),
+                ...(before ? { createdAt: { lt: new Date(before) } } : {})
             },
-            orderBy: { createdAt: 'asc' },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
             include: {
                 profile: { select: { id: true, fullName: true, role: true } }
             }
@@ -252,7 +265,12 @@ export const getMessages = async (req: AuthRequest, res: Response) => {
         });
 
         res.json({
-            messages,
+            messages: messages.reverse(),
+            pageInfo: {
+                limit,
+                hasMore: messages.length === limit,
+                nextCursor: messages.length > 0 ? messages[messages.length - 1].createdAt.toISOString() : null
+            },
             settings: roomSettings,
             mute: activeMute && (!activeMute.expiresAt || activeMute.expiresAt.getTime() > Date.now())
                 ? activeMute

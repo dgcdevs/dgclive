@@ -209,7 +209,6 @@ const buildDiscoveryItem = (item: {
 };
 
 const loadDiscoveryItems = async (): Promise<DiscoveryItem[]> => {
-  await syncMuxAssetsToEvents();
   const eventSelect: any = await buildCompatibleEventSelect();
   const supportsIsPublished = await eventHasColumn('isPublished');
 
@@ -262,6 +261,8 @@ const loadDiscoveryItems = async (): Promise<DiscoveryItem[]> => {
     )
   ];
 };
+
+const serializeDiscoveryItem = ({ searchText, ...item }: DiscoveryItem) => item;
 
 const sortDiscoveryItems = (items: DiscoveryItem[], sort: DiscoverySort) => {
   const sorted = [...items];
@@ -508,92 +509,126 @@ const getCurrentControlRoomEvent = async () => {
   });
 };
 
+const getPublicLiveEvent = async () => {
+  const eventSelect: any = await buildCompatibleEventSelect();
+
+  return prisma.event.findFirst({
+    where: {
+      title: { not: MASTER_STREAM_TITLE },
+      isLive: true,
+      isPublished: true
+    },
+    orderBy: { startTime: 'desc' },
+    select: eventSelect
+  });
+};
+
+const mapLiveStreamResponse = (targetEvent: any, isAdminOrMedia: boolean) => {
+  const lifecycleStage = deriveStreamLifecycle({
+    startTime: targetEvent.startTime,
+    isLive: targetEvent.isLive,
+    muxAssetId: targetEvent.muxAssetId,
+    muxStreamKey: targetEvent.muxStreamKey
+  });
+
+  return {
+    id: targetEvent.id,
+    title: targetEvent.title,
+    description: targetEvent.description || '',
+    playbackId: targetEvent.muxPlaybackId ?? null,
+    startTime: targetEvent.startTime,
+    streamStartedAt: lifecycleStage === 'live' ? targetEvent.startTime : null,
+    thumbnailUrl: targetEvent.thumbnailUrl,
+    preacherName: targetEvent.preacherName ?? null,
+    category: targetEvent.category ?? null,
+    recurrenceRule: targetEvent.recurrenceRule ?? null,
+    editorialStatus: getEventEditorialStatus(targetEvent),
+    countdownEnabled: targetEvent.countdownEnabled ?? false,
+    countdownOffsetMinutes: targetEvent.countdownOffsetMinutes ?? 0,
+    countdownTarget: getCountdownTarget(
+      targetEvent.startTime,
+      targetEvent.countdownEnabled ?? false,
+      targetEvent.countdownOffsetMinutes ?? 0
+    ),
+    scheduleSeriesId: targetEvent.scheduleSeriesId ?? null,
+    isPublished: targetEvent.isPublished ?? false,
+    isLive: lifecycleStage === 'live',
+    lifecycleStage,
+    encoderConnected: Boolean(targetEvent.isLive && targetEvent.muxStreamKey),
+    streamKey: isAdminOrMedia ? targetEvent.muxStreamKey : undefined,
+    muxStreamKey: isAdminOrMedia ? targetEvent.muxStreamKey : undefined
+  };
+};
+
+const loadScheduledServicesData = async () => {
+  const eventSelect: any = await buildCompatibleEventSelect();
+  const scheduledServices: any[] = await prisma.event.findMany({
+    where: {
+      title: { not: MASTER_STREAM_TITLE },
+      isLive: false,
+      startTime: { gt: new Date() }
+    },
+    orderBy: { startTime: 'asc' },
+    take: 20,
+    select: eventSelect
+  });
+
+  return scheduledServices
+    .map((event) => ({
+      ...event,
+      lifecycleStage: deriveStreamLifecycle(event)
+    }))
+    .filter((event) => event.lifecycleStage === 'scheduled')
+    .map((event: any) => ({
+      id: event.id,
+      title: event.title,
+      description: event.description || '',
+      startTime: event.startTime,
+      isPublic: event.isPublic,
+      thumbnailUrl: event.thumbnailUrl,
+      muxPlaybackId: event.muxPlaybackId,
+      lifecycleStage: event.lifecycleStage,
+      preacherName: event.preacherName ?? null,
+      category: event.category ?? null,
+      recurrenceRule: event.recurrenceRule ?? null,
+      editorialStatus: getEventEditorialStatus(event),
+      countdownEnabled: event.countdownEnabled ?? false,
+      countdownOffsetMinutes: event.countdownOffsetMinutes ?? 0,
+      countdownTarget: getCountdownTarget(
+        event.startTime,
+        event.countdownEnabled ?? false,
+        event.countdownOffsetMinutes ?? 0
+      ),
+      scheduleSeriesId: event.scheduleSeriesId ?? null
+    }));
+};
+
 export const getLiveStream = async (req: AuthRequest, res: Response) => {
   try {
     const isAdminOrMedia = req.user?.role === 'ADMIN' || req.user?.role === 'MEDIA';
-    const eventSelect: any = await buildCompatibleEventSelect();
     const targetEvent: any = isAdminOrMedia
       ? await getCurrentControlRoomEvent()
-      : await prisma.event.findFirst({
-          where: {
-            title: { not: MASTER_STREAM_TITLE },
-            isLive: true
-          },
-          orderBy: { startTime: 'desc' },
-          select: eventSelect
-        });
+      : await getPublicLiveEvent();
 
     if (!targetEvent) {
       res.status(404).json({ message: isAdminOrMedia ? 'No stream session found' : 'No live stream active' });
       return;
     }
 
-    let playbackId: string | null = targetEvent.muxPlaybackId;
-    let encoderConnected = false;
-
-    if (targetEvent.muxStreamKey) {
-      try {
-        const liveStreams = await mux.video.liveStreams.list({ limit: 100 });
-        const matchingStream = liveStreams.data?.find((stream: any) => {
-          const streamKey = stream.stream_keys?.[0]?.key || stream.stream_key;
-          return streamKey === targetEvent.muxStreamKey;
-        });
-
-        if (matchingStream && matchingStream.status === 'active') {
-          encoderConnected = true;
-        } else {
-          playbackId = null;
-        }
-      } catch (muxError: any) {
-        console.error('Mux check error:', muxError);
-        playbackId = null;
-      }
-    }
-
-    const lifecycleStage = deriveStreamLifecycle({
-      startTime: targetEvent.startTime,
-      isLive: targetEvent.isLive,
-      muxAssetId: targetEvent.muxAssetId,
-      muxStreamKey: targetEvent.muxStreamKey
-    });
-    const roomSettings = await prisma.chatRoomSettings.findUnique({
-      where: { roomKey: `event:${targetEvent.id}` }
-    });
-
-    if (!isAdminOrMedia && (lifecycleStage !== 'live' || targetEvent.isPublished === false || !encoderConnected)) {
+    if (!isAdminOrMedia && (!targetEvent.isLive || targetEvent.isPublished === false)) {
       res.status(404).json({ message: 'No live stream active' });
       return;
     }
 
+    const roomSettings = await prisma.chatRoomSettings.findUnique({
+      where: { roomKey: `event:${targetEvent.id}` }
+    });
+
     res.json({
-      id: targetEvent.id,
-      title: targetEvent.title,
-      description: targetEvent.description || '',
-      playbackId: isAdminOrMedia ? playbackId : (encoderConnected ? playbackId : null),
-      startTime: targetEvent.startTime,
-      streamStartedAt: lifecycleStage === 'live' ? targetEvent.startTime : null,
-      thumbnailUrl: targetEvent.thumbnailUrl,
-      preacherName: targetEvent.preacherName ?? null,
-      category: targetEvent.category ?? null,
-      recurrenceRule: targetEvent.recurrenceRule ?? null,
-      editorialStatus: getEventEditorialStatus(targetEvent),
-      countdownEnabled: targetEvent.countdownEnabled ?? false,
-      countdownOffsetMinutes: targetEvent.countdownOffsetMinutes ?? 0,
-      countdownTarget: getCountdownTarget(
-        targetEvent.startTime,
-        targetEvent.countdownEnabled ?? false,
-        targetEvent.countdownOffsetMinutes ?? 0
-      ),
-      scheduleSeriesId: targetEvent.scheduleSeriesId ?? null,
+      ...mapLiveStreamResponse(targetEvent, isAdminOrMedia),
       chatEnabled: roomSettings?.chatEnabled ?? true,
       slowMode: (roomSettings?.slowModeSeconds ?? 0) > 0,
-      slowModeSeconds: roomSettings?.slowModeSeconds ?? 0,
-      isPublished: targetEvent.isPublished ?? false,
-      isLive: lifecycleStage === 'live' ? (isAdminOrMedia ? true : encoderConnected) : false,
-      lifecycleStage,
-      encoderConnected,
-      streamKey: isAdminOrMedia ? targetEvent.muxStreamKey : undefined,
-      muxStreamKey: isAdminOrMedia ? targetEvent.muxStreamKey : undefined
+      slowModeSeconds: roomSettings?.slowModeSeconds ?? 0
     });
   } catch (error) {
     console.error('Get live stream error:', error);
@@ -610,7 +645,7 @@ export const getArchives = async (req: AuthRequest, res: Response) => {
     const filtered = allItems.filter((item) => source === 'all' || item.source === source).slice(0, take);
 
     res.json({
-      archives: filtered.map(({ searchText, ...item }) => item)
+      archives: filtered.map(serializeDiscoveryItem)
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to load archives' });
@@ -641,7 +676,7 @@ export const getDiscoveryFeed = async (req: AuthRequest, res: Response) => {
     const sorted = sortDiscoveryItems(filtered, sort).slice(0, take);
 
     res.json({
-      results: sorted.map(({ searchText, ...item }) => item),
+      results: sorted.map(serializeDiscoveryItem),
       total: filtered.length,
       facets: {
         sources: createFacetList(allItems.map((item) => item.source), 3),
@@ -650,8 +685,8 @@ export const getDiscoveryFeed = async (req: AuthRequest, res: Response) => {
         speakers: createFacetList(allItems.map((item) => item.speaker), 8)
       },
       collections: {
-        featured: sortDiscoveryItems(allItems, 'newest').slice(0, 6).map(({ searchText, ...item }) => item),
-        popular: sortDiscoveryItems(allItems, 'popular').slice(0, 6).map(({ searchText, ...item }) => item)
+        featured: sortDiscoveryItems(allItems, 'newest').slice(0, 6).map(serializeDiscoveryItem),
+        popular: sortDiscoveryItems(allItems, 'popular').slice(0, 6).map(serializeDiscoveryItem)
       },
       query: {
         q,
@@ -671,7 +706,6 @@ export const getDiscoveryFeed = async (req: AuthRequest, res: Response) => {
 
 export const getRecentStreams = async (req: AuthRequest, res: Response) => {
   try {
-    await syncMuxAssetsToEvents();
     const eventSelect: any = await buildCompatibleEventSelect({
       _count: {
         select: {
@@ -723,51 +757,46 @@ export const getRecentStreams = async (req: AuthRequest, res: Response) => {
 
 export const getScheduledServices = async (req: AuthRequest, res: Response) => {
   try {
-    const eventSelect: any = await buildCompatibleEventSelect();
-    const scheduledServices: any[] = await prisma.event.findMany({
-      where: {
-        title: { not: MASTER_STREAM_TITLE },
-        isLive: false,
-        startTime: { gt: new Date() }
-      },
-      orderBy: { startTime: 'asc' },
-      take: 20,
-      select: eventSelect
-    });
-
     res.json({
-      services: scheduledServices
-        .map((event) => ({
-          ...event,
-          lifecycleStage: deriveStreamLifecycle(event)
-        }))
-        .filter((event) => event.lifecycleStage === 'scheduled')
-        .map((event: any) => ({
-          id: event.id,
-          title: event.title,
-          description: event.description || '',
-          startTime: event.startTime,
-          isPublic: event.isPublic,
-          thumbnailUrl: event.thumbnailUrl,
-          muxPlaybackId: event.muxPlaybackId,
-          lifecycleStage: event.lifecycleStage,
-          preacherName: event.preacherName ?? null,
-          category: event.category ?? null,
-          recurrenceRule: event.recurrenceRule ?? null,
-          editorialStatus: getEventEditorialStatus(event),
-          countdownEnabled: event.countdownEnabled ?? false,
-          countdownOffsetMinutes: event.countdownOffsetMinutes ?? 0,
-          countdownTarget: getCountdownTarget(
-            event.startTime,
-            event.countdownEnabled ?? false,
-            event.countdownOffsetMinutes ?? 0
-          ),
-          scheduleSeriesId: event.scheduleSeriesId ?? null
-        }))
+      services: await loadScheduledServicesData()
     });
   } catch (error) {
     console.error('Failed to fetch scheduled services:', error);
     res.status(500).json({ error: 'Failed to fetch scheduled services' });
+  }
+};
+
+export const getDashboardHome = async (req: AuthRequest, res: Response) => {
+  try {
+    const [liveEvent, scheduledServices, discovery] = await Promise.all([
+      getPublicLiveEvent(),
+      loadScheduledServicesData(),
+      loadDiscoveryItems()
+    ]);
+
+    const newest = sortDiscoveryItems(discovery, 'newest');
+
+    res.json({
+      liveStream: liveEvent ? mapLiveStreamResponse(liveEvent, false) : null,
+      scheduledServices,
+      discovery: {
+        results: newest.slice(0, 24).map(serializeDiscoveryItem),
+        total: discovery.length,
+        facets: {
+          sources: createFacetList(discovery.map((item) => item.source), 3),
+          categories: createFacetList(discovery.map((item) => item.category), 8),
+          topics: createFacetList(discovery.flatMap((item) => item.topics), 10),
+          speakers: createFacetList(discovery.map((item) => item.speaker), 8)
+        },
+        collections: {
+          featured: newest.slice(0, 6).map(serializeDiscoveryItem),
+          popular: sortDiscoveryItems(discovery, 'popular').slice(0, 6).map(serializeDiscoveryItem)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Failed to fetch dashboard home:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard home' });
   }
 };
 
@@ -890,10 +919,11 @@ export const getContentReactions = async (req: AuthRequest, res: Response) => {
         ? { eventId: target.event.id }
         : { youtubeVideoId: target.youtubeVideo.id };
 
-    const [reactions, userReactions] = await Promise.all([
-      prisma.contentReaction.findMany({
+    const [reactionGroups, userReactions] = await Promise.all([
+      prisma.contentReaction.groupBy({
+        by: ['type'],
         where,
-        select: { type: true }
+        _count: { type: true }
       }),
       prisma.contentReaction.findMany({
         where: {
@@ -904,8 +934,8 @@ export const getContentReactions = async (req: AuthRequest, res: Response) => {
       })
     ]);
 
-    const counts = reactions.reduce<Record<string, number>>((acc, reaction) => {
-      acc[reaction.type] = (acc[reaction.type] || 0) + 1;
+    const counts = reactionGroups.reduce<Record<string, number>>((acc, reaction) => {
+      acc[reaction.type] = reaction._count.type;
       return acc;
     }, emptyReactionCounts());
 
@@ -1191,30 +1221,9 @@ export const getVideoById = async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    let playbackId: string | null = muxEvent.muxPlaybackId;
-    let isLiveNow = muxEvent.isLive;
-
-    if (muxEvent.isLive && muxEvent.muxStreamKey) {
-      try {
-        const liveStreams = await mux.video.liveStreams.list({ limit: 100 });
-        const matchingStream = liveStreams.data?.find((stream: any) => {
-          const streamKey = stream.stream_keys?.[0]?.key || stream.stream_key;
-          return streamKey === muxEvent.muxStreamKey;
-        });
-
-        if (!matchingStream || matchingStream.status !== 'active') {
-          playbackId = null;
-          isLiveNow = false;
-        }
-      } catch (muxError: any) {
-        console.error('Mux check error in getVideoById:', muxError);
-        playbackId = null;
-      }
-    }
-
     const lifecycleStage = deriveStreamLifecycle({
       startTime: muxEvent.startTime,
-      isLive: isLiveNow,
+      isLive: muxEvent.isLive,
       muxAssetId: muxEvent.muxAssetId,
       muxStreamKey: muxEvent.muxStreamKey
     });
@@ -1227,9 +1236,9 @@ export const getVideoById = async (req: AuthRequest, res: Response) => {
       publishedAt: muxEvent.startTime,
       viewCount: 0,
       source: 'mux',
-      muxPlaybackId: playbackId,
+      muxPlaybackId: muxEvent.muxPlaybackId,
       muxAssetId: muxEvent.muxAssetId,
-      isLive: isLiveNow,
+      isLive: muxEvent.isLive,
       isPublished: muxEvent.isPublished ?? true,
       channelTitle: 'Davidic Generation Church',
       lifecycleStage,

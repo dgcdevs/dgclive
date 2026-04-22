@@ -6,7 +6,7 @@ import { startStream, stopStream, getStreamConfig, publishStream, unpublishStrea
 import { createInvite } from './handlers/invite';
 import { requireAuth, requireAdmin, requireMediaOrAdmin } from './middleware/requireAuth';
 import { banUser, reactivateUser, getUsers, getInvites, updateUserRole, syncYouTubeVideos, setupMasterStream } from './handlers/admin';
-import { getLiveStream, getArchives, getDiscoveryFeed, getVideoById, getRecentStreams, getScheduledServices, getDashboardStats, deleteEvent, syncMuxAssets, trackContentView, getContentReactions, toggleContentReaction, getEventForEditing, updateEventContent } from './handlers/content';
+import { getLiveStream, getArchives, getDiscoveryFeed, getVideoById, getRecentStreams, getScheduledServices, getDashboardStats, deleteEvent, syncMuxAssets, trackContentView, getContentReactions, toggleContentReaction, getEventForEditing, updateEventContent, getDashboardHome } from './handlers/content';
 import { sendMessage, getMessages, getChatRoomSettings, updateChatRoomSettings, getChatRoomStats, flagChatMessage, moderateChatMessage, getChatModerationQueue, muteChatUser, unmuteChatUser } from './handlers/chat';
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './handlers/notifications';
 
@@ -45,6 +45,7 @@ router.delete('/chat/mutes', requireAuth, requireMediaOrAdmin, unmuteChatUser);
 router.get('/chat/:eventId', requireAuth, getMessages);
 router.get('/archive', requireAuth, getArchives);
 router.get('/content/discover', requireAuth, getDiscoveryFeed);
+router.get('/dashboard/home', requireAuth, getDashboardHome);
 router.get('/content/recent-streams', requireAuth, requireMediaOrAdmin, getRecentStreams);
 router.get('/content/scheduled-services', requireAuth, getScheduledServices);
 router.get('/content/dashboard-stats', requireAuth, requireMediaOrAdmin, getDashboardStats);

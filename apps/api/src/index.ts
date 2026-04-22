@@ -26,6 +26,20 @@ app.use(cors({
 	credentials: true // Allow cookies/headers if needed
 }));
 app.use(express.json());
+app.use((req, res, next) => {
+	const startedAt = Date.now();
+
+	res.on("finish", () => {
+		const durationMs = Date.now() - startedAt;
+		if (durationMs >= 500) {
+			console.warn(
+				`[Perf] ${req.method} ${req.originalUrl} -> ${res.statusCode} in ${durationMs}ms`
+			);
+		}
+	});
+
+	next();
+});
 
 // 2. Health Check (Kept from your friend's code)
 // This proves the database is alive.
@@ -45,17 +59,13 @@ app.use("/", routes);
 
 // 4. Socket.io Connection Handler
 io.on("connection", (socket) => {
-	console.log(`[Socket.io] Client connected: ${socket.id}`);
-
 	// Client joins a room (e.g., "control-room" or an eventId)
 	socket.on("join-room", (roomName: string) => {
-		console.log(`[Socket.io] ${socket.id} joined room: ${roomName}`);
 		socket.join(roomName);
 	});
 
 	socket.on("join-chat-room", (roomName: string) => {
 		if (!roomName) return;
-		console.log(`[Socket.io] ${socket.id} joined chat room: ${roomName}`);
 		socket.join(roomName);
 	});
 
@@ -68,17 +78,12 @@ io.on("connection", (socket) => {
 	socket.on("join-notifications", (userId: string) => {
 		if (userId) {
 			socket.join(`notifications-${userId}`);
-			console.log(`[Socket.io] ${socket.id} joined notifications room for user: ${userId}`);
 		}
 	});
 
 	// Broadcast to a specific room
 	socket.on("message", (roomName: string, message: any) => {
 		io.to(roomName).emit("message", message);
-	});
-
-	socket.on("disconnect", () => {
-		console.log(`[Socket.io] Client disconnected: ${socket.id}`);
 	});
 });
 

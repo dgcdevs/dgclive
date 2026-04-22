@@ -146,6 +146,11 @@ model Event {
   chatRoomSettings       ChatRoomSettings?
   chatRoomMutes          ChatRoomMute[]
   chatModerationActions  ChatModerationAction[]
+
+  @@index([startTime])
+  @@index([isLive, startTime])
+  @@index([isPublished, startTime])
+  @@index([muxAssetId, startTime])
 }
 
 // 5. Chat & Comments (PRD 6.3)
@@ -306,6 +311,8 @@ model ContentReaction {
   @@index([eventId, type])
   @@index([youtubeVideoId, type])
   @@index([profileId, type])
+  @@unique([profileId, eventId, type])
+  @@unique([profileId, youtubeVideoId, type])
 }
 
 model WatchSession {

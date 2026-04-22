@@ -2,8 +2,8 @@
 
 import { AlertTriangle, Flag, MessageSquareOff, MoreVertical, Send, Shield, TimerReset, User, XCircle } from "lucide-react"
 import { useEffect, useState, useRef, useCallback } from "react"
-import { io as socketIO, Socket } from "socket.io-client"
 import { useUser } from "../../lib/use-user"
+import { useSocket } from "@/lib/socket-context"
 
 interface ChatMessage {
     id: string
@@ -36,29 +36,24 @@ interface LiveChatProps {
 }
 
 export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
-    const { user, hasRole } = useUser()
+    const { user, hasRole, token } = useUser()
+    const { socket, connected } = useSocket()
     const isModerator = hasRole(["MEDIA", "ADMIN"])
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [inputText, setInputText] = useState("")
-    const [connected, setConnected] = useState(false)
     const [profileId, setProfileId] = useState<string | null>(null)
     const [roomSettings, setRoomSettings] = useState<ChatRoomSettings>({ chatEnabled: true, slowModeSeconds: 0 })
     const [mute, setMute] = useState<ChatMute | null>(null)
     const [errorMessage, setErrorMessage] = useState("")
     const [cooldownEndsAt, setCooldownEndsAt] = useState<number | null>(null)
+    const [historyCursor, setHistoryCursor] = useState<string | null>(null)
+    const [hasMoreHistory, setHasMoreHistory] = useState(false)
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false)
     const messagesContainerRef = useRef<HTMLDivElement>(null)
-    const socketRef = useRef<Socket | null>(null)
 
     useEffect(() => {
-        try {
-            const token = localStorage.getItem("token")
-            if (!token) return
-            const payload = JSON.parse(atob(token.split(".")[1]))
-            setProfileId(payload.sub || payload.userId || payload.id || null)
-        } catch {
-            console.warn("Could not decode JWT for profileId")
-        }
-    }, [])
+        setProfileId(user?.id ?? null)
+    }, [user?.id])
 
     const roomId = eventId ? `event:${eventId}` : (youtubeVideoId ? `youtube:${youtubeVideoId}` : null)
 
@@ -80,16 +75,22 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
         })
     }, [isModerator])
 
-    const loadHistory = useCallback(async () => {
+    const loadHistory = useCallback(async (before?: string | null) => {
         try {
-            const token = localStorage.getItem("token")
             if (!token || !roomId) return
+            setIsLoadingHistory(true)
 
             const url = eventId
                 ? `${process.env.NEXT_PUBLIC_API_URL}/chat/${eventId}`
                 : `${process.env.NEXT_PUBLIC_API_URL}/chat/none?youtubeVideoId=${youtubeVideoId}`
 
-            const res = await fetch(url, {
+            const params = new URLSearchParams()
+            params.set("limit", "50")
+            if (before) {
+                params.set("before", before)
+            }
+
+            const res = await fetch(`${url}${url.includes("?") ? "&" : "?"}${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` }
             })
             if (!res.ok) {
@@ -98,67 +99,78 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
             }
 
             const data = await res.json()
-            setMessages(isModerator ? (data.messages || []) : (data.messages || []).filter((item: ChatMessage) => item.moderationStatus !== "REMOVED"))
+            const nextMessages = isModerator ? (data.messages || []) : (data.messages || []).filter((item: ChatMessage) => item.moderationStatus !== "REMOVED")
+            setMessages((prev) => before ? [...nextMessages, ...prev] : nextMessages)
+            setHistoryCursor(data.pageInfo?.nextCursor || null)
+            setHasMoreHistory(Boolean(data.pageInfo?.hasMore))
             if (data.settings) setRoomSettings(data.settings)
             setMute(data.mute || null)
         } catch (err) {
             console.error("Failed to load chat history:", err)
+        } finally {
+            setIsLoadingHistory(false)
         }
-    }, [eventId, youtubeVideoId, roomId, isModerator])
+    }, [eventId, youtubeVideoId, roomId, isModerator, token])
 
     useEffect(() => {
         if (!roomId) return
 
-        void loadHistory()
+        setMessages([])
+        setHistoryCursor(null)
+        setHasMoreHistory(false)
+        void loadHistory(null)
+    }, [roomId, loadHistory])
 
-        const socket = socketIO(
-            process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
-            { transports: ["websocket"] }
-        )
-        socketRef.current = socket
+    useEffect(() => {
+        if (!socket || !roomId) return
 
-        socket.on("connect", () => {
-            setConnected(true)
-            socket.emit("join-chat-room", roomId)
-        })
+        socket.emit("join-chat-room", roomId)
 
-        socket.on("disconnect", () => {
-            setConnected(false)
-        })
-
-        socket.on("new-chat-message", (message: ChatMessage) => {
+        const handleNewMessage = (message: ChatMessage) => {
             updateMessageState(message)
-        })
+        }
 
-        socket.on("chat-message-updated", (message: ChatMessage) => {
+        const handleUpdatedMessage = (message: ChatMessage) => {
             updateMessageState(message)
-        })
+        }
 
-        socket.on("chat-room-settings-updated", (settings: ChatRoomSettings) => {
+        const handleRoomSettings = (settings: ChatRoomSettings) => {
             setRoomSettings(settings)
-        })
+        }
 
-        socket.on("chat-user-muted", ({ profileId: mutedProfileId, mute: nextMute }: { profileId: string, mute: ChatMute }) => {
+        const handleMuted = ({ profileId: mutedProfileId, mute: nextMute }: { profileId: string, mute: ChatMute }) => {
             if (mutedProfileId === profileId) {
                 setMute(nextMute)
             }
-        })
+        }
 
-        socket.on("chat-user-unmuted", ({ profileId: unmutedProfileId }: { profileId: string }) => {
+        const handleUnmuted = ({ profileId: unmutedProfileId }: { profileId: string }) => {
             if (unmutedProfileId === profileId) {
                 setMute(null)
             }
-        })
+        }
 
-        socket.on("chat-error", ({ message: errMsg }: { message: string }) => {
+        const handleChatError = ({ message: errMsg }: { message: string }) => {
             setErrorMessage(errMsg)
-        })
+        }
+
+        socket.on("new-chat-message", handleNewMessage)
+        socket.on("chat-message-updated", handleUpdatedMessage)
+        socket.on("chat-room-settings-updated", handleRoomSettings)
+        socket.on("chat-user-muted", handleMuted)
+        socket.on("chat-user-unmuted", handleUnmuted)
+        socket.on("chat-error", handleChatError)
 
         return () => {
             socket.emit("leave-chat-room", roomId)
-            socket.disconnect()
+            socket.off("new-chat-message", handleNewMessage)
+            socket.off("chat-message-updated", handleUpdatedMessage)
+            socket.off("chat-room-settings-updated", handleRoomSettings)
+            socket.off("chat-user-muted", handleMuted)
+            socket.off("chat-user-unmuted", handleUnmuted)
+            socket.off("chat-error", handleChatError)
         }
-    }, [roomId, loadHistory, profileId, updateMessageState])
+    }, [socket, roomId, profileId, updateMessageState])
 
     useEffect(() => {
         scrollToBottom()
@@ -179,7 +191,6 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
         const text = inputText.trim()
         if (!text || !profileId) return
 
-        const token = localStorage.getItem("token")
         if (!token) return
 
         setErrorMessage("")
@@ -213,7 +224,6 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
     }
 
     const handleFlagMessage = async (messageId: string) => {
-        const token = localStorage.getItem("token")
         if (!token) return
 
         try {
@@ -237,7 +247,6 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
     }
 
     const handleModeration = async (messageId: string, action: "approve" | "remove" | "restore") => {
-        const token = localStorage.getItem("token")
         if (!token) return
 
         try {
@@ -261,7 +270,6 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
     }
 
     const handleMuteUser = async (targetProfileId: string) => {
-        const token = localStorage.getItem("token")
         if (!token) return
 
         try {
@@ -348,6 +356,18 @@ export function LiveChat({ eventId, youtubeVideoId }: LiveChatProps) {
             ) : null}
 
             <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20">
+                {hasMoreHistory ? (
+                    <div className="flex justify-center">
+                        <button
+                            type="button"
+                            onClick={() => void loadHistory(historyCursor)}
+                            disabled={isLoadingHistory}
+                            className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/70 transition-colors hover:bg-white/10 disabled:opacity-50"
+                        >
+                            {isLoadingHistory ? "Loading..." : "Load older messages"}
+                        </button>
+                    </div>
+                ) : null}
                 {!roomId ? (
                     <div className="flex flex-col items-center justify-center h-full text-white/20 space-y-2">
                         <MessageSquareOff className="h-8 w-8" />

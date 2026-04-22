@@ -1,14 +1,14 @@
 "use client"
 
-import { Play, Calendar, ChevronRight } from "lucide-react"
+import { Play } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
-import { io as socketIO } from "socket.io-client"
-import MuxPlayer from "@mux/mux-player-react"
 import { useRouter } from "next/navigation"
 import { VideoCard } from "./video-card"
 import { SmallEventCard } from "./small-event-card"
 import { NewsletterBanner } from "./newsletter-banner"
+import { useAuth } from "@/lib/useAuth"
+import { useSocket } from "@/lib/socket-context"
 
 type ArchiveVideo = {
     id: string
@@ -37,14 +37,33 @@ type ScheduledService = {
     muxPlaybackId?: string
     preacherName?: string
     category?: string
-    recurrenceRule: "NONE" | "DAILY" | "WEEKLY" | "BIWEEKLY" | "MONTHLY"
-    editorialStatus: "DRAFT" | "SCHEDULED" | "READY" | "LIVE" | "ENDED" | "ARCHIVED" | "CANCELLED"
-    countdownEnabled: boolean
-    countdownOffsetMinutes: number
+}
+
+type DashboardHomeResponse = {
+    liveStream: {
+        id: string
+        title: string
+        isLive: boolean
+        isPublished: boolean
+        thumbnailUrl?: string
+    } | null
+    scheduledServices: ScheduledService[]
+    discovery: {
+        results: ArchiveVideo[]
+        facets?: {
+            topics?: Array<{ value: string }>
+            categories?: Array<{ value: string }>
+        }
+        collections?: {
+            popular?: ArchiveVideo[]
+        }
+    }
 }
 
 export function MemberDashboard() {
     const router = useRouter()
+    const { token } = useAuth()
+    const { socket } = useSocket()
     const [archives, setArchives] = useState<ArchiveVideo[]>([])
     const [popularArchives, setPopularArchives] = useState<ArchiveVideo[]>([])
     const [browseTopics, setBrowseTopics] = useState<string[]>([])
@@ -57,136 +76,87 @@ export function MemberDashboard() {
     const [hasToken, setHasToken] = useState(false)
     const [displayCount, setDisplayCount] = useState(12)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
-
-    // NEW states for Live Stream
-    const [liveStream, setLiveStream] = useState<any>(null)
+    const [liveStream, setLiveStream] = useState<DashboardHomeResponse["liveStream"]>(null)
     const [isLoadingLiveStream, setIsLoadingLiveStream] = useState(true)
 
-    const loadLiveStream = async () => {
+    const loadDashboardHome = async () => {
         try {
             setIsLoadingLiveStream(true)
-            const token = localStorage.getItem("token")
-            const headers: Record<string, string> = {}
-            if (token) headers.Authorization = `Bearer ${token}`
+            setIsLoadingUpcoming(true)
+            setIsLoadingArchives(true)
+            setArchiveError("")
+            setUpcomingError("")
 
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
-            if (res.ok) {
-                const data = await res.json()
-                setLiveStream(data)
-            } else {
+            if (!token) {
+                setHasToken(false)
                 setLiveStream(null)
+                setScheduledServices([])
+                setArchives([])
+                setPopularArchives([])
+                setBrowseTopics([])
+                setBrowseCategories([])
+                setArchiveError("Sign in to access the sermon archive")
+                return
             }
+
+            setHasToken(true)
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/dashboard/home`, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            })
+
+            const data = await res.json() as DashboardHomeResponse & { error?: string }
+            if (!res.ok) {
+                throw new Error(data.error || "Failed to load dashboard")
+            }
+
+            setLiveStream(data.liveStream || null)
+            setScheduledServices(data.scheduledServices || [])
+            setArchives(data.discovery?.results || [])
+            setPopularArchives(data.discovery?.collections?.popular || [])
+            setBrowseTopics((data.discovery?.facets?.topics || []).slice(0, 6).map((item) => item.value))
+            setBrowseCategories((data.discovery?.facets?.categories || []).slice(0, 5).map((item) => item.value))
         } catch (error) {
-            console.error("Failed to load live stream:", error)
+            const message = error instanceof Error ? error.message : "Failed to load dashboard"
             setLiveStream(null)
+            setArchiveError(message)
+            setUpcomingError(message)
         } finally {
             setIsLoadingLiveStream(false)
+            setIsLoadingUpcoming(false)
+            setIsLoadingArchives(false)
         }
     }
 
     useEffect(() => {
-        loadLiveStream()
+        void loadDashboardHome()
+    }, [token])
 
-        // Listen for global stream published events
-        const socket = socketIO(process.env.NEXT_PUBLIC_API_URL!.replace('/api', '') || 'http://localhost:3001', {
-            transports: ['websocket'],
-        })
+    useEffect(() => {
+        if (!socket) return
 
-        socket.on('STREAM_PUBLISHED', () => {
-            console.log("Stream just went public! Refreshing live stream data...")
-            loadLiveStream()
-        })
+        const refresh = () => {
+            void loadDashboardHome()
+        }
 
-        socket.on('STREAM_ENDED', () => {
-            setLiveStream(null)
-        })
+        socket.on("STREAM_PUBLISHED", refresh)
+        socket.on("STREAM_UNPUBLISHED", refresh)
+        socket.on("STREAM_ENDED", refresh)
+        socket.on("recent-streams-updated", refresh)
 
         return () => {
-            socket.disconnect()
+            socket.off("STREAM_PUBLISHED", refresh)
+            socket.off("STREAM_UNPUBLISHED", refresh)
+            socket.off("STREAM_ENDED", refresh)
+            socket.off("recent-streams-updated", refresh)
         }
-    }, [])
-
-    useEffect(() => {
-        const token = localStorage.getItem("token")
-        if (!token) {
-            setIsLoadingUpcoming(false)
-            return
-        }
-
-        const loadScheduledServices = async () => {
-            try {
-                setIsLoadingUpcoming(true)
-                setUpcomingError("")
-
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/scheduled-services`, {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
-                })
-
-                const data = await res.json()
-                if (!res.ok) {
-                    throw new Error(data.error || "Failed to load scheduled services")
-                }
-
-                setScheduledServices(data.services || [])
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "Failed to load scheduled services"
-                setUpcomingError(errorMessage)
-            } finally {
-                setIsLoadingUpcoming(false)
-            }
-        }
-
-        void loadScheduledServices()
-    }, [])
-
-    useEffect(() => {
-        const loadArchives = async () => {
-            try {
-                setIsLoadingArchives(true)
-                setArchiveError("")
-
-                const token = localStorage.getItem("token")
-                if (!token) {
-                    setArchiveError("Sign in to access the sermon archive")
-                    setHasToken(false)
-                    setIsLoadingArchives(false)
-                    return
-                }
-
-                setHasToken(true)
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/discover?take=24&sort=newest`, {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
-                })
-
-                const data = await res.json()
-                if (!res.ok) {
-                    throw new Error(data.error || "Failed to load archives")
-                }
-
-                setArchives(data.results || [])
-                setPopularArchives(data.collections?.popular || [])
-                setBrowseTopics((data.facets?.topics || []).slice(0, 6).map((item: { value: string }) => item.value))
-                setBrowseCategories((data.facets?.categories || []).slice(0, 5).map((item: { value: string }) => item.value))
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "Failed to load archives"
-                setArchiveError(errorMessage)
-            } finally {
-                setIsLoadingArchives(false)
-            }
-        }
-
-        void loadArchives()
-    }, [])
+    }, [socket, token])
 
     const handleLoadMore = async () => {
         setIsLoadingMore(true)
-        // Simulate a small delay for UX
-        await new Promise(resolve => setTimeout(resolve, 300))
-        setDisplayCount(prev => prev + 9)
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        setDisplayCount((prev) => prev + 9)
         setIsLoadingMore(false)
     }
 
@@ -208,7 +178,6 @@ export function MemberDashboard() {
 
     return (
         <div className="space-y-12 pb-12">
-            {/* 1. NOW LIVE / FEATURED SECTION */}
             {isLoadingLiveStream ? (
                 <div className="animate-pulse h-[340px] bg-white/5 rounded-2xl w-full border border-white/5"></div>
             ) : liveStream && liveStream.isLive && liveStream.isPublished ? (
@@ -225,25 +194,12 @@ export function MemberDashboard() {
                             href={`/watch/${liveStream.id}?source=mux`}
                             className="group block relative overflow-hidden rounded-xl bg-brand-card/30 border border-white/5 hover:border-brand-purple/50 transition-all duration-300 aspect-[16/9]"
                         >
-                            {/* Live MuxPlayer preview — muted autoplay */}
-                            {liveStream.playbackId ? (
-                                <MuxPlayer
-                                    streamType="ll-live"
-                                    playbackId={liveStream.playbackId}
-                                    muted
-                                    autoPlay="any"
-                                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                                    accentColor="#A828FF"
-                                    primaryColor="#A828FF"
-                                />
-                            ) : (
-                                <div className="absolute inset-0 bg-zinc-800" />
-                            )}
-
-                            {/* Gradient overlay for text legibility */}
+                            <div
+                                className="absolute inset-0 bg-zinc-800 bg-cover bg-center"
+                                style={liveStream.thumbnailUrl ? { backgroundImage: `url(${liveStream.thumbnailUrl})` } : undefined}
+                            />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
 
-                            {/* LIVE badge */}
                             <div className="absolute left-4 top-4">
                                 <span className="flex items-center gap-1.5 rounded bg-[#FF0000] px-2 py-0.5 text-[10px] font-bold tracking-wider text-white shadow-[0_0_10px_rgba(255,0,0,0.4)] animate-pulse">
                                     <span className="h-1.5 w-1.5 rounded-full bg-white" />
@@ -251,12 +207,8 @@ export function MemberDashboard() {
                                 </span>
                             </div>
 
-                            {/* Bottom metadata */}
                             <div className="absolute bottom-0 left-0 w-full p-4">
                                 <div className="flex items-start gap-4">
-                                    <div className="h-10 w-10 rounded-full bg-black flex items-center justify-center shrink-0 border border-white/10 overflow-hidden">
-                                        <img src="/dgclivelogo.png" alt="DGC Logo" className="w-full h-full object-contain p-1" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                                    </div>
                                     <div>
                                         <h3 className="font-bold text-white text-lg md:text-xl line-clamp-1">{liveStream.title}</h3>
                                         <p className="mt-1 text-sm text-white/70">Davidic Generation Church</p>
@@ -267,7 +219,6 @@ export function MemberDashboard() {
                                 </div>
                             </div>
 
-                            {/* Play button hover */}
                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-purple/90 text-white shadow-lg backdrop-blur-sm transform scale-90 group-hover:scale-100 transition-transform">
                                     <Play className="h-5 w-5 fill-current" />
@@ -279,11 +230,10 @@ export function MemberDashboard() {
             ) : (
                 <section>
                     <h2 className="text-2xl font-bold text-white mb-6">Welcome to Davidic Generation Church</h2>
-                    <p className="text-white/60 mb-8 max-w-2xl">We don't have a live broadcast right now. Please explore our recent sermons below or view our upcoming scheduled services!</p>
+                    <p className="text-white/60 mb-8 max-w-2xl">We don't have a live broadcast right now. Please explore our recent sermons below or view our upcoming scheduled services.</p>
                 </section>
             )}
 
-            {/* 2. UPCOMING SERVICES */}
             <section>
                 <h2 className="text-2xl font-bold text-white mb-6">Upcoming Services & Events</h2>
 
@@ -311,8 +261,6 @@ export function MemberDashboard() {
                 )}
             </section>
 
-
-            {/* 3. PREVIOUS SERMONS */}
             <section>
                 <h2 className="text-2xl font-bold text-white mb-6">Previous Sermons & Events</h2>
                 {!hasToken && !isLoadingArchives ? (
@@ -328,9 +276,7 @@ export function MemberDashboard() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             {archives.slice(0, displayCount).map((video) => {
                                 const isYouTube = video.source === "youtube"
-                                const viewText = video.viewCount
-                                    ? `${video.viewCount.toLocaleString()} views`
-                                    : "Members only"
+                                const viewText = video.viewCount ? `${video.viewCount.toLocaleString()} views` : "Members only"
 
                                 return (
                                     <VideoCard
@@ -420,7 +366,6 @@ export function MemberDashboard() {
                 </div>
             </section>
 
-            {/* 4. NEWSLETTER */}
             <section className="pt-8">
                 <NewsletterBanner />
             </section>
