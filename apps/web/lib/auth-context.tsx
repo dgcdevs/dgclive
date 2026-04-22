@@ -123,8 +123,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         void bootstrap()
 
+        // Listen for custom token-updated event (fired when login stores token)
+        const handleTokenUpdated = () => {
+            console.log("[Auth] Token updated event received, re-bootstrapping...")
+            void bootstrap()
+        }
+
+        if (typeof window !== "undefined") {
+            window.addEventListener("auth:token-updated", handleTokenUpdated as EventListener)
+        }
+
         return () => {
             cancelled = true
+            if (typeof window !== "undefined") {
+                window.removeEventListener("auth:token-updated", handleTokenUpdated as EventListener)
+            }
         }
     }, [refreshUser])
 

@@ -4,7 +4,7 @@ services:
     env: node
     region: oregon
     plan: standard
-    buildCommand: cd apps/api && npm install && npm run build
+    buildCommand: cd apps/api && npm install && npm run build && npx prisma migrate deploy
     startCommand: cd apps/api && npm start
     envVars:
       - key: NODE_ENV

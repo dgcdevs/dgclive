@@ -16,18 +16,18 @@ export default function DashboardLayout({
     const router = useRouter()
 
     useEffect(() => {
-        if (!loading) {
-            // If not logged in, redirect to auth
-            // Check both context user and localStorage token to handle race conditions during login
-            const hasToken = typeof window !== 'undefined' && localStorage.getItem("token")
-            if (!user && !hasToken) {
-                router.push("/auth")
-                return
-            }
+        // If loading is done and user is null, redirect to auth
+        if (!loading && !user) {
+            router.push("/auth")
         }
     }, [user, loading, router])
 
     if (loading) {
+        return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><LoadingSpinner size="lg" message="Loading..." /></div>
+    }
+
+    // If not loading but no user, will redirect via useEffect above
+    if (!user) {
         return <div className="min-h-screen bg-brand-bg flex items-center justify-center"><LoadingSpinner size="lg" message="Loading..." /></div>
     }
 
