@@ -73,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!res.ok) {
             if (res.status === 401 || res.status === 403) {
+                // Token is invalid or expired - clear it
                 signOut()
             }
             throw new Error("Session invalid")
