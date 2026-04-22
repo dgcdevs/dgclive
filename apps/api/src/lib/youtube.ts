@@ -35,7 +35,9 @@ const requireEnv = (name: string): string => {
   return value;
 };
 
-export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}) => {
+export const fetchChannelVideos = async (
+  options: FetchChannelVideosOptions = {}
+) => {
   const apiKey = requireEnv("YOUTUBE_API_KEY");
   const channelId = requireEnv("YOUTUBE_CHANNEL_ID");
 
@@ -44,8 +46,9 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
     channelId,
     maxResults: String(options.maxResults ?? 25),
     order: "date",
-    type: "video",  // Only get videos, not channels or playlists
-    key: apiKey
+    type: "video",
+    eventType: "completed", // only completed livestreams
+    key: apiKey,
   });
 
   if (options.pageToken) {
@@ -62,20 +65,24 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
     throw new Error(`YouTube search failed: ${errorText}`);
   }
 
-  const searchData = await searchRes.json() as any;
+  const searchData = (await searchRes.json()) as any;
   const items = Array.isArray(searchData.items) ? searchData.items : [];
+
   const videoIds = items
     .map((item: { id?: { videoId?: string } }) => item?.id?.videoId)
     .filter((id: string | undefined): id is string => Boolean(id));
 
   if (videoIds.length === 0) {
-    return { videos: [] as YouTubeVideoItem[], nextPageToken: searchData.nextPageToken as string | undefined };
+    return {
+      videos: [] as YouTubeVideoItem[],
+      nextPageToken: searchData.nextPageToken as string | undefined,
+    };
   }
 
   const detailParams = new URLSearchParams({
-    part: "snippet,contentDetails,statistics",
+    part: "snippet,contentDetails,statistics,liveStreamingDetails",
     id: videoIds.join(","),
-    key: apiKey
+    key: apiKey,
   });
 
   const detailRes = await fetch(`${YOUTUBE_API_BASE}/videos?${detailParams.toString()}`);
@@ -84,15 +91,22 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
     throw new Error(`YouTube details failed: ${errorText}`);
   }
 
-  const detailData = await detailRes.json() as any;
+  const detailData = (await detailRes.json()) as any;
   const detailItems = Array.isArray(detailData.items) ? detailData.items : [];
 
   const videos = detailItems
+    .filter((item: any) => {
+      // Extra guard: keep only videos that were actually livestreams
+      // and have finished.
+      const live = item.liveStreamingDetails;
+      return Boolean(live?.actualEndTime);
+    })
     .map((item: any) => {
       const snippet = item.snippet || {};
       const contentDetails = item.contentDetails || {};
       const statistics = item.statistics || {};
       const thumbnails = snippet.thumbnails || {};
+
       const thumbnailUrl =
         thumbnails.maxres?.url ||
         thumbnails.high?.url ||
@@ -100,29 +114,22 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
         thumbnails.default?.url ||
         "";
 
-      const durationSeconds = parseIsoDurationToSeconds(contentDetails.duration || "");
-      
       return {
         youtubeId: item.id,
         title: snippet.title || "",
         description: snippet.description || "",
         thumbnailUrl,
-        durationSeconds,
+        durationSeconds: parseIsoDurationToSeconds(contentDetails.duration || ""),
         publishedAt: snippet.publishedAt || new Date().toISOString(),
         viewCount: Number(statistics.viewCount || 0),
         channelId: snippet.channelId || channelId,
-        channelTitle: snippet.channelTitle || ""
-      } as YouTubeVideoItem;
-    })
-    .filter((video: YouTubeVideoItem) => {
-      // Filter out shorts (videos under 60 seconds)
-      if (video.durationSeconds < 60) {
-        console.log(`[YouTube] Skipping short: "${video.title}" (${video.durationSeconds}s)`);
-        return false;
-      }
-      return true;
+        channelTitle: snippet.channelTitle || "",
+      } satisfies YouTubeVideoItem;
     });
 
-  console.log(`[YouTube] Fetched ${videos.length} videos (${detailItems.length} total after filtering shorts)`);
-  return { videos, nextPageToken: searchData.nextPageToken as string | undefined };
+  console.log(`[YouTube] Fetched ${videos.length} completed livestreams`);
+  return {
+    videos,
+    nextPageToken: searchData.nextPageToken as string | undefined,
+  };
 };
