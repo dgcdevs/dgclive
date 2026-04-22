@@ -18,7 +18,9 @@ export default function DashboardLayout({
     useEffect(() => {
         if (!loading) {
             // If not logged in, redirect to auth
-            if (!user) {
+            // Check both context user and localStorage token to handle race conditions during login
+            const hasToken = typeof window !== 'undefined' && localStorage.getItem("token")
+            if (!user && !hasToken) {
                 router.push("/auth")
                 return
             }

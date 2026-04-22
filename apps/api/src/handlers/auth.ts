@@ -203,6 +203,17 @@ export const login = async (req: Request, res: Response) => {
       return;
     }
 
+    // Debug: Log token details
+    try {
+      const parts = data.session.access_token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        console.log(`[Auth] Login successful - Token exp: ${payload.exp}, iat: ${payload.iat}, current time: ${Math.floor(Date.now() / 1000)}, expires in: ${payload.exp - Math.floor(Date.now() / 1000)}s`);
+      }
+    } catch (e) {
+      console.error("[Auth] Could not decode login token:", e);
+    }
+
     // 2. Fetch Profile from Prisma (to return role, etc.)
     const profile = await prisma.profile.findUnique({
       where: { id: data.user.id },
