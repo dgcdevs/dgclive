@@ -78,8 +78,8 @@ export default function CreateServicePage() {
                 body: formData,
             })
 
-            if (uploadError) {
-                throw new Error(uploadError.message || 'Failed to upload thumbnail')
+            if (!res.ok) {
+                throw new Error('Failed to upload thumbnail')
             }
 
             const data = await res.json()
@@ -91,7 +91,7 @@ export default function CreateServicePage() {
         }
     }
 
-    const handleStartStream = async () => {
+    const handlePrepareStream = async () => {
         // Reset errors
         setUploadError(null)
         setStreamError(null)
@@ -515,7 +515,7 @@ export default function CreateServicePage() {
                             Cancel
                         </button>
                         <button
-                            onClick={confirmStartStream}
+                            onClick={handlePrepareStream}
                             disabled={isSubmitting}
                             className="flex-[3] flex items-center justify-center py-3 rounded-lg text-sm font-bold text-white bg-[#A828FF] hover:bg-[#9222de] shadow-[0_0_20px_rgba(168,40,255,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >

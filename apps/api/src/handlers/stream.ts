@@ -5,7 +5,6 @@ import { prisma } from '../lib/prisma';
 import { notifyAllMembers } from '../lib/notifications';
 import { io } from '../index';
 import { deriveStreamLifecycle } from '../lib/streamLifecycle';
-import { AuthRequest } from '../middleware/requireAuth';
 import { getRecentBroadcastAuditLogs, recordBroadcastAuditLog } from '../lib/broadcastAudit';
 
 const RECURRENCE_RULES = ['NONE', 'DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'] as const;
@@ -373,7 +372,7 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             eventId: newEvent.id,
             isScheduled,
             lifecycleStage: isScheduled ? 'scheduled' : 'ready',
-            editorialStatus: newEvent.editorialStatus
+            editorialStatus: newEvent.editorialStatus,
             reused: false
         });
 
@@ -393,15 +392,6 @@ export const stopStream = async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const existingEvent = await prisma.event.findUnique({
-            where: { id: eventId }
-        });
-
-        if (!existingEvent) {
-            res.status(404).json({ error: "Event not found" });
-            return;
-        }
-
         const stream = await prisma.event.update({
             where: { id: eventId },
             data: {
@@ -409,17 +399,6 @@ export const stopStream = async (req: AuthRequest, res: Response) => {
                 isPublished: false,
                 muxStreamKey: null,
                 editorialStatus: 'ENDED'
-            }
-        // 1. Update Database: "Show's Over"
-        // - Clear stream key for new session on next start
-        // - Unpublish so viewers can't see this stream anymore
-        // - Mark as not live
-        const stream = await prisma.event.update({
-            where: { id: eventId },
-            data: { 
-                isLive: false, // Stops showing "LIVE" badge
-                isPublished: false, // Hide stream from viewers (end the session)
-                muxStreamKey: null // Clear stream key - next start will generate a NEW key
             }
         });
 

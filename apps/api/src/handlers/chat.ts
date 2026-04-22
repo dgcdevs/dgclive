@@ -7,27 +7,10 @@ import { io } from '../index';
 export const sendMessage = async (req: AuthRequest, res: Response) => {
     try {
         const { text, eventId } = req.body;
-        const userId = req.user.id;
+        const userId = req.user?.id;
 
-        if (activeMute && (!activeMute.expiresAt || activeMute.expiresAt.getTime() > Date.now())) {
-            res.status(403).json({
-                error: activeMute.expiresAt
-                    ? `You are muted in this room until ${activeMute.expiresAt.toISOString()}.`
-                    : "You are muted in this room."
-            });
-            return;
-        }
-
-        if (
-            roomSettings.slowModeSeconds > 0 &&
-            !isModerator(profile.role) &&
-            lastMessage &&
-            Date.now() - lastMessage.createdAt.getTime() < roomSettings.slowModeSeconds * 1000
-        ) {
-            res.status(429).json({
-                error: `Slow mode is active. Please wait ${roomSettings.slowModeSeconds} seconds between messages.`
-            });
-            return;
+        if (!userId || !eventId || !text) {
+            return res.status(400).json({ error: "userId, eventId, and text are required" });
         }
 
         // Check if user is platform-banned
@@ -41,20 +24,22 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
             return res.status(403).json({ error: "You are muted in chat" });
         }
 
+        // Use eventId as roomKey (consistent with Stream Chat channel naming)
+        const roomKey = `event-${eventId}`;
+
         const message = await prisma.chatMessage.create({
             data: {
-                text: trimmedText,
-                roomKey: target.roomKey,
+                text,
+                roomKey,
                 profileId: userId,
-                ...(target.eventId ? { eventId: target.eventId } : {}),
-                ...(target.youtubeVideoId ? { youtubeVideoId: target.youtubeVideoId } : {})
+                eventId
             },
             include: {
                 profile: { select: { fullName: true, role: true } }
             }
         });
 
-        io.to(target.roomKey).emit('new-chat-message', message);
+        io.emit('new-chat-message', { ...message, eventId });
 
         res.status(201).json(message);
     } catch (error) {
@@ -70,16 +55,9 @@ export const getMessages = async (req: any, res: Response) => {
     const offset = parseInt(req.query.offset || "0");
 
     try {
-        const target = await resolveRoomTarget({ eventId, youtubeVideoId });
-        if (!target) {
-            res.status(400).json({ error: "Either eventId or youtubeVideoId is required" });
-            return;
-        }
-
-        const roomSettings = await ensureRoomSettings(target);
         const messages = await prisma.chatMessage.findMany({
             where: { eventId },
-            orderBy: { createdAt: 'asc' },
+            orderBy: { createdAt: 'desc' },
             include: {
                 profile: { select: { fullName: true, role: true } }
             },
@@ -89,19 +67,13 @@ export const getMessages = async (req: any, res: Response) => {
 
         const total = await prisma.chatMessage.count({ where: { eventId } });
 
-        res.json({ messages, total, limit, offset });
-
         res.json({
             messages: messages.reverse(),
             pageInfo: {
                 limit,
                 hasMore: messages.length === limit,
                 nextCursor: messages.length > 0 ? messages[messages.length - 1].createdAt.toISOString() : null
-            },
-            settings: roomSettings,
-            mute: activeMute && (!activeMute.expiresAt || activeMute.expiresAt.getTime() > Date.now())
-                ? activeMute
-                : null
+            }
         });
     } catch (error) {
         console.error("Failed to fetch messages", error);
@@ -333,9 +305,11 @@ export const postAnnouncement = async (req: AuthRequest, res: Response) => {
         const moderator = await prisma.profile.findUnique({ where: { id: req.user.id } });
 
         // Create as system message (from moderator)
+        const roomKey = `event-${eventId}`;
         const message = await prisma.chatMessage.create({
             data: {
                 text: `[📌 ANNOUNCEMENT] ${text}`,
+                roomKey,
                 profileId: req.user.id, // Posted by moderator
                 eventId: eventId
             },

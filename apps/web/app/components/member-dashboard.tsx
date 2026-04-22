@@ -90,19 +90,10 @@ export function MemberDashboard() {
             setIsLoadingArchives(true)
             setArchiveError("")
             setUpcomingError("")
+            setLiveStreamError("")
 
             if (!token) {
                 setHasToken(false)
-            setLiveStreamError("")
-            const token = localStorage.getItem("token")
-            const headers: Record<string, string> = {}
-            if (token) headers.Authorization = `Bearer ${token}`
-
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
-            if (res.ok) {
-                const data = await res.json()
-                setLiveStream(data)
-            } else {
                 setLiveStream(null)
                 setScheduledServices([])
                 setArchives([])
@@ -135,8 +126,8 @@ export function MemberDashboard() {
             console.error("Failed to load live stream:", error)
             setLiveStreamError("Failed to load live stream. Please try again.")
             setLiveStream(null)
-            setArchiveError(message)
-            setUpcomingError(message)
+            setArchiveError("Failed to load sermon archive. Please try again.")
+            setUpcomingError("Failed to load upcoming services. Please try again.")
         } finally {
             setIsLoadingLiveStream(false)
             setIsLoadingUpcoming(false)
@@ -202,7 +193,7 @@ export function MemberDashboard() {
                 <InlineErrorMessage
                     error={liveStreamError}
                     onDismiss={() => setLiveStreamError("")}
-                    onRetry={loadLiveStream}
+                    onRetry={loadDashboardHome}
                 />
             ) : liveStream && liveStream.isLive && liveStream.isPublished ? (
                 <section>
