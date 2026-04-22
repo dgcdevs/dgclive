@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { Eye, EyeOff, Copy, Check, Clock, Video, MessageSquare, Heart, Settings, Wifi, WifiOff, ChevronDown } from "lucide-react"
+import { Eye, EyeOff, Copy, Check, Clock, Video, MessageSquare, Heart, Settings, Wifi, WifiOff, ChevronDown, AlertTriangle, ShieldAlert } from "lucide-react"
 import { useUser } from "../../../lib/use-user"
 import { ChatContainer } from "../../components/chat"
 import { Toast, useToast } from "../../components/ui/toast"
@@ -44,6 +44,14 @@ function StudioTimer({ streamStartedAt, isLive }: { streamStartedAt: string | nu
     return <span className="text-sm font-bold font-mono text-white tracking-widest">{uptime}</span>;
 }
 
+type PublishReadinessCheck = {
+    id: string
+    label: string
+    status: "pass" | "warn" | "fail"
+    required: boolean
+    details: string
+}
+
 export default function ControlRoomPage() {
     const { hasRole, loading } = useUser()
     const router = useRouter()
@@ -66,6 +74,7 @@ export default function ControlRoomPage() {
     const [eventStreamKey, setEventStreamKey] = useState<string | null>(null)
     const [isLive, setIsLive] = useState(false)
     const [isPublished, setIsPublished] = useState(false)
+    const [lifecycleStage, setLifecycleStage] = useState<'idle' | 'scheduled' | 'ready' | 'live' | 'ended' | 'archived'>('idle')
     const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
     const [showKey, setShowKey] = useState(false)
     const [copied, setCopied] = useState(false)
@@ -73,21 +82,29 @@ export default function ControlRoomPage() {
     const [diagnosticLogs, setDiagnosticLogs] = useState<{ time: string, message: string }[]>([])
     const [viewerCount, setViewerCount] = useState<number>(0)
     const [isPublishing, setIsPublishing] = useState(false)
+    const [isSubmittingUnpublish, setIsSubmittingUnpublish] = useState(false)
     const [obsStatus, setObsStatus] = useState<'connecting' | 'live' | 'offline'>('offline')
 
     // Engagement Stats State
     const [peakViewers, setPeakViewers] = useState<number>(0)
     const [chatMessages, setChatMessages] = useState<number>(0)
     const [reactions, setReactions] = useState<number>(0)
+    const [flaggedMessages, setFlaggedMessages] = useState<number>(0)
+    const [mutedUsers, setMutedUsers] = useState<number>(0)
     const [isLoadingConfig, setIsLoadingConfig] = useState(true)
     const [streamError, setStreamError] = useState<{ message: string, code: string } | null>(null)
     const [encoderError, setEncoderError] = useState<string | null>(null)
     const [socketConnected, setSocketConnected] = useState(false)
     const [showDiagnosticModal, setShowDiagnosticModal] = useState(false)
+    const [showPublishModal, setShowPublishModal] = useState(false)
+    const [showUnpublishModal, setShowUnpublishModal] = useState(false)
     const [activeSidebarTab, setActiveSidebarTab] = useState<'chat' | 'health' | 'stats' | 'controls'>('chat')
     const [isConfigExpanded, setIsConfigExpanded] = useState(false)
     const [encoderConnected, setEncoderConnected] = useState(false)
     const [checkingEncoderStatus, setCheckingEncoderStatus] = useState(false)
+    const [publishChecks, setPublishChecks] = useState<PublishReadinessCheck[]>([])
+    const [publishAcknowledgements, setPublishAcknowledgements] = useState<string[]>([])
+    const [isLoadingPublishReadiness, setIsLoadingPublishReadiness] = useState(false)
 
     const socketRef = useRef<Socket | null>(null)
     const isFetchingLiveStatusRef = useRef(false)
@@ -111,10 +128,17 @@ export default function ControlRoomPage() {
             .then(res => res.json())
             .then(data => {
                 setEncoderConnected(data.isConnected || false);
+                if (data.playbackId) {
+                    setPlaybackId(data.playbackId);
+                }
                 setEncoderError(null); // Clear error on successful check
                 // Update obsStatus to 'live' when encoder is detected
                 if (data.isConnected) {
+                    setIsLive(true);
+                    setLifecycleStage(data.lifecycleStage ?? 'live');
                     setObsStatus('live');
+                } else if (data.lifecycleStage === 'ready') {
+                    setObsStatus('connecting');
                 }
                 console.log('[Encoder Status]', data);
             })
@@ -206,15 +230,29 @@ export default function ControlRoomPage() {
                 return data;
             })
             .then(data => {
-                if (!data) return;
+                if (!data) {
+                    setEventId(null);
+                    setPlaybackId(null);
+                    setEventStreamKey(null);
+                    setIsLive(false);
+                    setIsPublished(false);
+                    setLifecycleStage('idle');
+                    setObsStatus('offline');
+                    return;
+                }
                 if (data.id) {
                     setEventId(data.id);
                     setIsLive(data.isLive ?? false);
                     setIsPublished(data.isPublished ?? false);
-                    setObsStatus(data.isLive ? 'live' : 'offline');
+                    setLifecycleStage(data.lifecycleStage ?? 'idle');
+                    setObsStatus(data.encoderConnected ? 'live' : data.lifecycleStage === 'ready' ? 'connecting' : 'offline');
                 }
                 if (data.playbackId) setPlaybackId(data.playbackId);
-                if (data.muxStreamKey) setEventStreamKey(data.muxStreamKey); // Sync event stream key from backend
+                if (data.muxStreamKey) {
+                    setEventStreamKey(data.muxStreamKey);
+                } else if (data.lifecycleStage === 'ended' || data.lifecycleStage === 'archived') {
+                    setEventStreamKey(null);
+                }
                 if (data.thumbnailUrl) setThumbnailUrl(data.thumbnailUrl);
                 if (data.streamStartedAt) setStreamStartedAt(data.streamStartedAt);
                 if (data.chatEnabled !== undefined) setChatEnabled(data.chatEnabled);
@@ -326,6 +364,7 @@ export default function ControlRoomPage() {
                 console.log("[Socket] stream-ended:", payload);
                 setIsLive(false);
                 setIsPublished(false);
+                setLifecycleStage('ended');
                 setObsStatus('offline');
                 setEventStreamKey(null); // Clear event stream key when stream ends
             });
@@ -335,11 +374,17 @@ export default function ControlRoomPage() {
                 // DO NOT touch isLive here — that is governed purely by the OBS connection.
                 // Modifying it causes React to remount the MuxPlayer wrapper.
                 if (payload.isPublished !== undefined) setIsPublished(payload.isPublished);
+                if (payload.lifecycleStage) setLifecycleStage(payload.lifecycleStage);
             });
 
             socket.on("stream-preview-ready", () => { setIsPublished(false); });
 
             socket.on("stream-published", () => { setIsPublished(true); });
+
+            socket.on("stream-chat-settings-updated", (settings: { chatEnabled?: boolean, slowModeSeconds?: number }) => {
+                if (settings.chatEnabled !== undefined) setChatEnabled(settings.chatEnabled);
+                if (settings.slowModeSeconds !== undefined) setSlowMode(settings.slowModeSeconds > 0);
+            });
 
             socket.on("stream-diagnostic", (payload: { type: string, message: string }) => {
                 const timestamp = new Date().toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' });
@@ -360,7 +405,7 @@ export default function ControlRoomPage() {
             // Fallbacks for the custom Publish/Unpublish global events if needed
             socket.on("STREAM_PUBLISHED", () => { setIsPublished(true); });
             socket.on("STREAM_UNPUBLISHED", () => { setIsPublished(false); });
-            socket.on("STREAM_ENDED", () => { setIsLive(false); setIsPublished(false); setObsStatus('offline'); });
+            socket.on("STREAM_ENDED", () => { setIsLive(false); setIsPublished(false); setLifecycleStage('ended'); setObsStatus('offline'); });
         }
 
         return () => {
@@ -383,9 +428,6 @@ export default function ControlRoomPage() {
         return () => clearInterval(interval);
     }, [obsStatus]);
 
-    // Poll engagement stats while the event is active
-    // TODO: Implement /stream/:id/stats endpoint on backend
-    /*
     useEffect(() => {
         if (!eventId) return;
 
@@ -399,6 +441,12 @@ export default function ControlRoomPage() {
                     const data = await res.json();
                     setChatMessages(data.chatMessages);
                     setReactions(data.reactions);
+                    setFlaggedMessages(data.flaggedMessages || 0);
+                    setMutedUsers(data.mutedUsers || 0);
+                    if (typeof data.currentViewers === "number") {
+                        setViewerCount(data.currentViewers);
+                        setPeakViewers(prev => Math.max(prev, data.currentViewers));
+                    }
                 }
             } catch (err) {
                 console.error("Failed to fetch stream stats", err);
@@ -409,7 +457,42 @@ export default function ControlRoomPage() {
         const interval = setInterval(fetchStats, 10000);
         return () => clearInterval(interval);
     }, [eventId]);
-    */
+
+    useEffect(() => {
+        if (!eventId) {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+            return;
+        }
+
+        if (obsStatus === 'live' && isLive) {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+            return;
+        }
+
+        checkEncoderStatus.current();
+
+        if (encoderStatusIntervalRef.current) {
+            clearInterval(encoderStatusIntervalRef.current);
+        }
+
+        // Poll the lightweight status endpoint aggressively while waiting for OBS/Mux handshake.
+        encoderStatusIntervalRef.current = setInterval(() => {
+            checkEncoderStatus.current();
+        }, 3000);
+
+        return () => {
+            if (encoderStatusIntervalRef.current) {
+                clearInterval(encoderStatusIntervalRef.current);
+                encoderStatusIntervalRef.current = null;
+            }
+        };
+    }, [eventId, obsStatus, isLive]);
 
     // Auto-trigger diagnostic modal if a critical error is detected
     useEffect(() => {
@@ -459,18 +542,26 @@ export default function ControlRoomPage() {
 
     const handleStreamSettingUpdate = async (setting: { chatEnabled?: boolean, slowMode?: boolean }) => {
         if (!eventId) return;
+        const previousState = { chatEnabled, slowMode };
         if (setting.chatEnabled !== undefined) setChatEnabled(setting.chatEnabled);
         if (setting.slowMode !== undefined) setSlowMode(setting.slowMode);
 
         try {
             const token = localStorage.getItem('token');
-            await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/${eventId}/settings`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/${eventId}/settings`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify(setting)
             });
+
+            if (!res.ok) {
+                throw new Error("Failed to persist chat settings");
+            }
         } catch (error) {
             console.error("Failed to update stream setting", error);
+            setChatEnabled(previousState.chatEnabled);
+            setSlowMode(previousState.slowMode);
+            showToast("Failed to update chat settings", "error");
         }
     };
 
@@ -492,8 +583,13 @@ export default function ControlRoomPage() {
             })
 
             if (res.ok) {
-                setEventStreamKey(null) // Clear event stream key when stream ends
-                router.push("/dashboard")
+                setIsLive(false)
+                setIsPublished(false)
+                setLifecycleStage('ended')
+                setObsStatus('offline')
+                setEventStreamKey(null)
+                showToast("Stream session ended. We’ll keep watching for the archive.", "success")
+                loadLiveStatus.current()
             } else {
                 const data = await res.json()
                 showToast(data.error || "Failed to end stream", "error")
@@ -520,8 +616,10 @@ export default function ControlRoomPage() {
                 setEventId(data.eventId)
                 setPlaybackId(data.playbackId)
                 setEventStreamKey(data.streamKey) // Capture the event-specific stream key
-                setIsLive(true)
-                setObsStatus('connecting') // Stop polling loop until encoder is detected
+                setIsLive(false)
+                setIsPublished(false)
+                setLifecycleStage(data.lifecycleStage ?? (data.isScheduled ? 'scheduled' : 'ready'))
+                setObsStatus(data.isScheduled ? 'offline' : 'connecting')
                 setEncoderConnected(false)
                 showToast("Stream event created! Start streaming now from OBS/ffmpeg.", "success")
                 
@@ -543,6 +641,32 @@ export default function ControlRoomPage() {
     }
 
     const handlePublish = async () => {
+        if (!eventId || isPublishing || isLoadingPublishReadiness) return
+        setIsLoadingPublishReadiness(true)
+        try {
+            const token = localStorage.getItem('token')
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/${eventId}/publish-readiness`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+            if (res.ok) {
+                const data = await res.json()
+                const checks = Array.isArray(data.checks) ? data.checks : []
+                setPublishChecks(checks)
+                setPublishAcknowledgements([])
+                setShowPublishModal(true)
+            } else {
+                const data = await res.json()
+                showToast(data.error || "Failed to load publish readiness", "error")
+            }
+        } catch (err) {
+            console.error(err)
+            showToast("Error loading publish readiness", "error")
+        } finally {
+            setIsLoadingPublishReadiness(false)
+        }
+    }
+
+    const handleConfirmPublish = async () => {
         if (!eventId || isPublishing) return
         setIsPublishing(true)
         try {
@@ -550,12 +674,21 @@ export default function ControlRoomPage() {
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/publish`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ eventId })
+                body: JSON.stringify({
+                    eventId,
+                    confirmedChecklist: publishAcknowledgements,
+                    overrideWarnings: publishChecks.some((check) => check.status === "warn")
+                })
             })
             if (res.ok) {
                 setIsPublished(true)
+                setShowPublishModal(false)
+                showToast("Stream published to the public watch page.", "success")
             } else {
                 const data = await res.json()
+                if (data.readiness?.checks) {
+                    setPublishChecks(data.readiness.checks)
+                }
                 showToast(data.error || "Failed to publish stream", "error")
             }
         } catch (err) {
@@ -567,8 +700,8 @@ export default function ControlRoomPage() {
     }
 
     const handleUnpublish = async () => {
-        if (!eventId || isPublishing) return
-        setIsPublishing(true)
+        if (!eventId || isSubmittingUnpublish) return
+        setIsSubmittingUnpublish(true)
         try {
             const token = localStorage.getItem('token')
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/unpublish`, {
@@ -578,6 +711,8 @@ export default function ControlRoomPage() {
             })
             if (res.ok) {
                 setIsPublished(false)
+                setShowUnpublishModal(false)
+                showToast("The stream is no longer public, but the private preview is still running.", "success")
             } else {
                 const data = await res.json()
                 showToast(data.error || "Failed to unpublish stream", "error")
@@ -586,7 +721,7 @@ export default function ControlRoomPage() {
             console.error(err)
             showToast("Error unpublishing stream", "error")
         } finally {
-            setIsPublishing(false)
+            setIsSubmittingUnpublish(false)
         }
     }
 
@@ -600,6 +735,19 @@ export default function ControlRoomPage() {
     // Only use actual event playbackId — NEVER use masterPlaybackId for playback
     // Master stream is for OBS ingest only, not for display
     const activePlaybackId = playbackId || null;
+    const publishHasBlockers = publishChecks.some((check) => check.required && check.status === 'fail')
+    const allChecksAcknowledged = publishChecks.length > 0 && publishChecks.every((check) => publishAcknowledgements.includes(check.id))
+    const sessionBadge = lifecycleStage === 'live'
+        ? { label: 'Live', className: 'bg-red-500/10 text-red-500 border-red-500/20', dot: 'bg-red-500 animate-pulse' }
+        : lifecycleStage === 'ready'
+            ? { label: 'Standby', className: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20', dot: 'bg-yellow-400' }
+            : lifecycleStage === 'scheduled'
+                ? { label: 'Scheduled', className: 'bg-blue-500/10 text-blue-400 border-blue-500/20', dot: 'bg-blue-400' }
+                : lifecycleStage === 'ended'
+                    ? { label: 'Ended', className: 'bg-white/5 text-white/50 border-white/10', dot: 'bg-white/30' }
+                    : lifecycleStage === 'archived'
+                        ? { label: 'Archived', className: 'bg-green-500/10 text-green-400 border-green-500/20', dot: 'bg-green-400' }
+                        : { label: 'Offline', className: 'bg-white/5 text-white/40 border-white/10', dot: 'bg-white/20' };
 
     if (loading) return null
     if (!hasRole(["MEDIA", "ADMIN"])) return null
@@ -611,16 +759,10 @@ export default function ControlRoomPage() {
                 <div className="flex items-center gap-6">
                     <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
-                            {isLive && isPublished && obsStatus === 'live' ? (
-                                <span className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-red-500/10 text-red-500 text-[10px] font-black uppercase tracking-widest border border-red-500/20">
-                                    <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                                    Live
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-white/5 text-white/40 text-[10px] font-black uppercase tracking-widest border border-white/10">
-                                    Offline
-                                </span>
-                            )}
+                            <span className={`flex items-center gap-2 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-widest border ${sessionBadge.className}`}>
+                                <div className={`h-1.5 w-1.5 rounded-full ${sessionBadge.dot}`} />
+                                {sessionBadge.label}
+                            </span>
                             <h1 className="text-sm font-bold text-white/90">Studio Control Room</h1>
                         </div>
                     </div>
@@ -786,23 +928,25 @@ export default function ControlRoomPage() {
                             {/* ── LAYER 4: Go Live button (bottom-center) ── */}
                             {isLive && obsStatus === 'live' && !isPublished && (
                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
-                                    <button
-                                        onClick={handlePublish}
-                                        disabled={isPublishing}
-                                        className="flex items-center gap-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-[0_0_30px_rgba(239,68,68,0.5)] hover:shadow-[0_0_40px_rgba(239,68,68,0.7)] transition-all animate-pulse hover:animate-none"
-                                    >
-                                        {isPublishing ? (
-                                            <>
-                                                <LoadingSpinner size="sm" />
-                                                Publishing...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span className="h-2.5 w-2.5 rounded-full bg-white" />
-                                                Go Live to Public
-                                            </>
-                                        )}
-                                    </button>
+                                    {!isPublished ? (
+                                        <button
+                                            onClick={handlePublish}
+                                            disabled={isPublishing || isLoadingPublishReadiness}
+                                            className="flex items-center gap-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-[0_0_30px_rgba(239,68,68,0.5)] hover:shadow-[0_0_40px_rgba(239,68,68,0.7)] transition-all animate-pulse hover:animate-none"
+                                        >
+                                            <span className="h-2.5 w-2.5 rounded-full bg-white" />
+                                            {isLoadingPublishReadiness ? "Checking Readiness..." : "Go Live to Public"}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => setShowUnpublishModal(true)}
+                                            disabled={isSubmittingUnpublish}
+                                            className="flex items-center gap-2.5 bg-zinc-800 hover:bg-zinc-700 border border-white/20 disabled:opacity-60 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-lg"
+                                        >
+                                            <span className="h-2.5 w-2.5 rounded-full bg-red-500 border border-red-200" />
+                                            {isSubmittingUnpublish ? "Updating..." : "Stop Public Stream"}
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -819,7 +963,7 @@ export default function ControlRoomPage() {
                     />
 
                     {/* Start Stream Event Button — shown after key is generated */}
-                    {masterStreamKey && !isLive && (
+                    {masterStreamKey && (!eventId || lifecycleStage === 'ended' || lifecycleStage === 'archived') && (
                         <div className="mt-6 p-6 bg-gradient-to-br from-brand-purple/10 to-brand-purple/5 border border-brand-purple/20 rounded-2xl space-y-4">
                             {streamError && (
                                 <InlineErrorMessage
@@ -884,13 +1028,7 @@ export default function ControlRoomPage() {
                     <div className="flex-1 overflow-hidden flex flex-col">
                         {activeSidebarTab === 'chat' && (
                             <div className="flex-1 flex flex-col min-h-0 bg-black/10">
-                                {eventId ? (
-                                    <ChatContainer eventId={eventId} isLive={isLive && isPublished} />
-                                ) : (
-                                    <div className="flex-1 flex items-center justify-center text-white/50">
-                                        <p>Start streaming to see chat</p>
-                                    </div>
-                                )}
+                                <LiveChat eventId={eventId || undefined} />
                             </div>
                         )}
 
@@ -933,6 +1071,8 @@ export default function ControlRoomPage() {
                                         <StatCard label="Peak Viewers" value={peakViewers} icon={<Eye className="h-4 w-4" />} />
                                         <StatCard label="Messages" value={chatMessages} icon={<MessageSquare className="h-4 w-4" />} />
                                         <StatCard label="Reactions" value={reactions} icon={<Heart className="h-4 w-4" />} />
+                                        <StatCard label="Flagged" value={flaggedMessages} icon={<MessageSquare className="h-4 w-4" />} />
+                                        <StatCard label="Muted Users" value={mutedUsers} icon={<MessageSquare className="h-4 w-4" />} />
                                         <StatCard label="Uptime" value={isLive ? 'Active' : 'Offline'} icon={<Clock className="h-4 w-4" />} />
                                     </div>
                                 </div>
@@ -981,6 +1121,153 @@ export default function ControlRoomPage() {
                             {isGeneratingKey && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                             {isGeneratingKey ? "Provisioning..." : "Generate Stream Key"}
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {showPublishModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-lg p-4">
+                    <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#111111] shadow-2xl overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-5 border-b border-white/5 bg-black/30">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-red-500/10 border border-red-500/20">
+                                    <ShieldAlert className="h-5 w-5 text-red-400" />
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold text-white">Publish Readiness Check</h2>
+                                    <p className="text-xs text-white/40 mt-1">Review the checklist before taking this stream public.</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowPublishModal(false)}
+                                className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-white transition-colors"
+                            >
+                                <EyeOff className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-5">
+                            {publishHasBlockers && (
+                                <div className="flex gap-3 rounded-xl border border-red-500/15 bg-red-500/5 p-4">
+                                    <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-sm font-semibold text-red-300">Publishing is blocked until the required failures are resolved.</p>
+                                        <p className="text-xs text-red-200/80 mt-1">The system is preventing a public push because the stream is not in a safe ready state yet.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!publishHasBlockers && publishChecks.some((check) => check.status === "warn") && (
+                                <div className="flex gap-3 rounded-xl border border-yellow-500/15 bg-yellow-500/5 p-4">
+                                    <AlertTriangle className="h-5 w-5 text-yellow-300 shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-sm font-semibold text-yellow-200">Warnings detected.</p>
+                                        <p className="text-xs text-yellow-100/70 mt-1">You can still publish after confirming the checklist, but the control room is surfacing metadata gaps first.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-3">
+                                {publishChecks.map((check) => (
+                                    <label
+                                        key={check.id}
+                                        className={`flex gap-4 rounded-xl border p-4 cursor-pointer transition-colors ${
+                                            check.status === "fail"
+                                                ? "border-red-500/15 bg-red-500/5"
+                                                : check.status === "warn"
+                                                    ? "border-yellow-500/15 bg-yellow-500/5"
+                                                    : "border-green-500/15 bg-green-500/5"
+                                        }`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={publishAcknowledgements.includes(check.id)}
+                                            onChange={() => {
+                                                setPublishAcknowledgements((current) =>
+                                                    current.includes(check.id)
+                                                        ? current.filter((id) => id !== check.id)
+                                                        : [...current, check.id]
+                                                )
+                                            }}
+                                            className="mt-1 h-4 w-4 rounded border-white/20 bg-black text-red-500 focus:ring-red-500"
+                                        />
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`h-2.5 w-2.5 rounded-full ${
+                                                    check.status === "fail"
+                                                        ? "bg-red-400"
+                                                        : check.status === "warn"
+                                                            ? "bg-yellow-300"
+                                                            : "bg-green-400"
+                                                }`} />
+                                                <p className="text-sm font-semibold text-white">
+                                                    {check.label}
+                                                    {check.required && <span className="ml-2 text-[10px] uppercase tracking-widest text-white/35">Required</span>}
+                                                </p>
+                                            </div>
+                                            <p className="text-xs text-white/55 mt-2 leading-relaxed">{check.details}</p>
+                                        </div>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 px-6 py-5 border-t border-white/5 bg-black/30">
+                            <p className="text-xs text-white/45">
+                                {publishHasBlockers
+                                    ? "Fix the failed checks first."
+                                    : allChecksAcknowledged
+                                        ? "Checklist confirmed. You can publish."
+                                        : "Acknowledge every checklist item before publishing."}
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowPublishModal(false)}
+                                    className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-white/70 text-sm font-semibold hover:bg-white/10 transition-colors"
+                                >
+                                    Back to Preview
+                                </button>
+                                <button
+                                    onClick={handleConfirmPublish}
+                                    disabled={isPublishing || publishHasBlockers || !allChecksAcknowledged}
+                                    className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
+                                >
+                                    {isPublishing ? "Publishing..." : "Publish to Public"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showUnpublishModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-lg p-4">
+                    <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111111] shadow-2xl overflow-hidden">
+                        <div className="px-6 py-5 border-b border-white/5 bg-black/30">
+                            <h2 className="text-lg font-bold text-white">Stop Public Stream?</h2>
+                            <p className="text-xs text-white/45 mt-1">This keeps the encoder session running, but removes the stream from the public watch page.</p>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                                <p className="text-sm text-white/80">Current viewers: <span className="font-semibold text-white">{viewerCount.toLocaleString()}</span></p>
+                                <p className="text-xs text-white/50 mt-2">Use this when you need to pull the public feed without ending the session entirely.</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 px-6 py-5 border-t border-white/5 bg-black/30">
+                            <button
+                                onClick={() => setShowUnpublishModal(false)}
+                                className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-white/70 text-sm font-semibold hover:bg-white/10 transition-colors"
+                            >
+                                Keep Public
+                            </button>
+                            <button
+                                onClick={handleUnpublish}
+                                disabled={isSubmittingUnpublish}
+                                className="px-5 py-2.5 rounded-xl bg-zinc-100 text-black hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold transition-colors"
+                            >
+                                {isSubmittingUnpublish ? "Updating..." : "Stop Public Stream"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

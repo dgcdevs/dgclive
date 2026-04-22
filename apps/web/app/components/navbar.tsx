@@ -12,14 +12,13 @@ import { useUser } from "../../lib/use-user"
 export function Navbar() {
     const pathname = usePathname()
     const router = useRouter()
-    const { hasRole, user } = useUser()
+    const { hasRole, user, signOut } = useUser()
     const [showUserMenu, setShowUserMenu] = useState(false)
     const [searchQuery, setSearchQuery] = useState("")
 
     const handleSignOut = () => {
-        localStorage.removeItem('token')
-        localStorage.removeItem('user')
-        window.location.href = '/auth' // Force refresh to clear state
+        signOut()
+        window.location.href = '/auth'
     }
 
     const handleSearch = (e: React.FormEvent) => {

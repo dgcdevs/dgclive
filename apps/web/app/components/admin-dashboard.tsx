@@ -119,6 +119,26 @@ export function AdminDashboard() {
         }
     };
 
+    const handleSuspensionToggle = async (userId: string, isBanned: boolean) => {
+        try {
+            const endpoint = isBanned ? "reactivate" : "ban";
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/${userId}/${endpoint}`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || "Failed to update suspension status");
+
+            showNotification(data.message || (isBanned ? "User reactivated" : "User suspended"), "success");
+            fetchUsers(token, searchQuery);
+        } catch (err: any) {
+            showNotification(err.message, "error");
+        }
+    };
+
     const handleGenerateKey = async () => {
         if (!memberName) return showNotification("Please enter a Member Name", "error");
 
@@ -423,16 +443,17 @@ export function AdminDashboard() {
                         </div>
 
                         {/* List Header */}
-                        <div className="grid grid-cols-[1fr_120px] px-6 py-3 bg-white/[0.02] border-b border-white/5">
+                        <div className="grid grid-cols-[1fr_120px_140px] px-6 py-3 bg-white/[0.02] border-b border-white/5">
                             <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider">Member</span>
                             <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider">Role</span>
+                            <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider">Access</span>
                         </div>
 
                         {/* User List */}
                         {users.length > 0 ? (
                             <div className="divide-y divide-white/5">
                                 {users.map((user) => (
-                                    <div key={user.id} className="grid grid-cols-[1fr_120px] px-6 py-4 hover:bg-white/5 transition-colors items-center">
+                                    <div key={user.id} className="grid grid-cols-[1fr_120px_140px] px-6 py-4 hover:bg-white/5 transition-colors items-center gap-3">
                                         <div className="flex items-center gap-3">
                                             <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-bold text-white/50">
                                                 {user.fullName ? user.fullName.substring(0, 2).toUpperCase() : "??"}
@@ -440,6 +461,9 @@ export function AdminDashboard() {
                                             <div>
                                                 <h4 className="text-sm font-bold text-white">{user.fullName || "Unknown"}</h4>
                                                 <p className="text-xs text-white/30">{user.email}</p>
+                                                {user.isBanned && (
+                                                    <p className="text-[10px] text-red-400 uppercase tracking-wider mt-1 font-bold">Suspended</p>
+                                                )}
                                             </div>
                                         </div>
 
@@ -453,6 +477,20 @@ export function AdminDashboard() {
                                             <option value="MEDIA">MEDIA</option>
                                             <option value="ADMIN">ADMIN</option>
                                         </select>
+
+                                        <button
+                                            onClick={() => handleSuspensionToggle(user.id, user.isBanned)}
+                                            disabled={user.role === "ADMIN"}
+                                            className={`px-3 py-2 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                                                user.role === "ADMIN"
+                                                    ? "bg-white/5 text-white/25 cursor-not-allowed"
+                                                    : user.isBanned
+                                                        ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                                                        : "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                                            }`}
+                                        >
+                                            {user.role === "ADMIN" ? "Protected" : user.isBanned ? "Reactivate" : "Suspend"}
+                                        </button>
                                     </div>
                                 ))}
                             </div>

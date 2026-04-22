@@ -1,181 +1,432 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowUpRight, Signal, Users, Clock, Share2, MoreHorizontal, Video, Calendar, Eye, Radio, TrendingUp, MessageSquare, Play } from "lucide-react"
+import { Radio, Upload, Trash2, Pencil, BellRing } from "lucide-react"
+import { Toast, useToast } from "./ui/toast"
+import { useEffect, useState } from "react"
+import { useSocket } from "@/lib/socket-context"
+import { useAuth } from "@/lib/useAuth"
+
+interface RecentStream {
+    id: string
+    title: string
+    description: string
+    startTime: string
+    chatCount: number
+    thumbnailUrl: string | null
+    preacherName?: string | null
+    category?: string | null
+    isPublished: boolean
+    editorialStatus?: string
+}
+
+interface ScheduledService {
+    id: string
+    title: string
+    startTime: string
+    isPublic: boolean
+    preacherName?: string
+    category?: string
+}
+
+interface DashboardStats {
+    totalLiveServices: string
+    totalViewers: string
+    avgWatchTime: string
+    peakViewers: string
+    scheduledServices?: string
+}
+
+interface AuditLogItem {
+    id: string
+    action: string
+    summary: string
+    createdAt: string
+}
 
 export function MediaDashboard() {
-    // Current Media Dashboard Content (Restored)
+    const { token } = useAuth()
+    const { socket } = useSocket()
+    const [recentStreams, setRecentStreams] = useState<RecentStream[]>([])
+    const [scheduledServices, setScheduledServices] = useState<ScheduledService[]>([])
+    const [stats, setStats] = useState<DashboardStats | null>(null)
+    const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
+    const [loading, setLoading] = useState(true)
+    const [syncing, setSyncing] = useState(false)
+    const [isSavingReplay, setIsSavingReplay] = useState(false)
+    const [editingReplayId, setEditingReplayId] = useState<string | null>(null)
+    const [replayForm, setReplayForm] = useState({
+        title: "",
+        description: "",
+        preacherName: "",
+        category: "",
+        thumbnailUrl: "",
+        isPublished: false
+    })
+    const [lastAutoUpdated, setLastAutoUpdated] = useState<Date | null>(null)
+    const { toast, showToast, closeToast } = useToast()
+
+    const fetchDashboardData = async (showLoading = true) => {
+        if (!token) return
+        if (showLoading) setLoading(true)
+
+        try {
+            const [recentRes, scheduledRes, statsRes, auditRes] = await Promise.all([
+                fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/recent-streams`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                }),
+                fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/scheduled-services`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                }),
+                fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/dashboard-stats`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                }),
+                fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/audit-log?limit=8`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                })
+            ])
+
+            if (recentRes.ok) {
+                const data = await recentRes.json()
+                setRecentStreams(data.streams || [])
+            }
+
+            if (scheduledRes.ok) {
+                const data = await scheduledRes.json()
+                setScheduledServices(data.services || [])
+            }
+
+            if (statsRes.ok) {
+                const data = await statsRes.json()
+                setStats(data)
+            }
+
+            if (auditRes.ok) {
+                const data = await auditRes.json()
+                setAuditLogs(data.logs || [])
+            }
+        } catch (error) {
+            console.error("Failed to fetch dashboard data:", error)
+        } finally {
+            if (showLoading) setLoading(false)
+        }
+    }
+
+    useEffect(() => {
+        void fetchDashboardData(true)
+    }, [token])
+
+    useEffect(() => {
+        if (!socket) return
+
+        const handleRecentStreamsUpdated = () => {
+            void fetchDashboardData(false)
+            setLastAutoUpdated(new Date())
+        }
+
+        socket.on("recent-streams-updated", handleRecentStreamsUpdated)
+        return () => {
+            socket.off("recent-streams-updated", handleRecentStreamsUpdated)
+        }
+    }, [socket, token])
+
+    const handleDelete = async (eventId: string, type: "recent" | "scheduled") => {
+        if (!window.confirm("Are you sure you want to delete this stream?") || !token) return
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${eventId}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` }
+            })
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                throw new Error(data.error || "Failed to delete event")
+            }
+
+            if (type === "recent") {
+                setRecentStreams((prev) => prev.filter((stream) => stream.id !== eventId))
+            } else {
+                setScheduledServices((prev) => prev.filter((service) => service.id !== eventId))
+            }
+
+            showToast("Event deleted successfully", "success")
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "Failed to delete event", "error")
+        }
+    }
+
+    const handleSendReminder = async (eventId: string) => {
+        if (!token) return
+
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/remind`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ eventId })
+            })
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}))
+                throw new Error(data.error || "Failed to send reminder")
+            }
+
+            showToast("Reminder sent to members", "success")
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "Failed to send reminder", "error")
+        }
+    }
+
+    const handleReplayThumbnailUpload = async (file: File) => {
+        const formData = new FormData()
+        formData.append("file", file)
+
+        const res = await fetch("/api/upload", {
+            method: "POST",
+            body: formData
+        })
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}))
+            throw new Error(data.error || "Failed to upload thumbnail")
+        }
+
+        const data = await res.json()
+        setReplayForm((prev) => ({ ...prev, thumbnailUrl: data.url }))
+    }
+
+    const handleSaveReplay = async () => {
+        if (!editingReplayId || !token) return
+
+        try {
+            setIsSavingReplay(true)
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${editingReplayId}`, {
+                method: "PATCH",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(replayForm)
+            })
+
+            const data = await res.json()
+            if (!res.ok) {
+                throw new Error(data.error || "Failed to update replay")
+            }
+
+            setRecentStreams((prev) =>
+                prev.map((stream) =>
+                    stream.id === editingReplayId
+                        ? {
+                            ...stream,
+                            title: data.event.title,
+                            description: data.event.description || "",
+                            thumbnailUrl: data.event.thumbnailUrl,
+                            preacherName: data.event.preacherName,
+                            category: data.event.category,
+                            isPublished: data.event.isPublished,
+                            editorialStatus: data.event.editorialStatus
+                        }
+                        : stream
+                )
+            )
+
+            setEditingReplayId(null)
+            showToast("Replay updated successfully", "success")
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "Failed to update replay", "error")
+        } finally {
+            setIsSavingReplay(false)
+        }
+    }
+
+    const handleSyncMux = async () => {
+        if (!token) return
+
+        try {
+            setSyncing(true)
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/sync-mux`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` }
+            })
+
+            const data = await response.json()
+            if (!response.ok) {
+                throw new Error(data.error || "Unknown error")
+            }
+
+            showToast(`Successfully synced. Created ${data.newEventsCreated} new records.`, "success")
+            void fetchDashboardData(false)
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "Failed to sync Mux assets", "error")
+        } finally {
+            setSyncing(false)
+        }
+    }
+
     return (
-        <div className="space-y-8">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">Davidic Generation Church</h1>
-                    <p className="text-white/50 mt-1">Manage your live streams and viewing experience</p>
-                </div>
-                <Link href="/create" className="flex items-center gap-2 bg-[#A828FF] hover:bg-[#9222de] text-white px-6 py-3 rounded-lg font-bold transition-all shadow-[0_0_20px_rgba(168,40,255,0.3)] hover:shadow-[0_0_30px_rgba(168,40,255,0.5)]">
-                    <Radio className="h-4 w-4" />
-                    Go Live
-                </Link>
-            </div>
-
-            {/* Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <MetricCard
-                    title="Total Live Services"
-                    value="124"
-                    trend="+12% this month"
-                    icon={<Signal className="h-5 w-5 text-white/50" />}
-                />
-                <MetricCard
-                    title="Total Viewers"
-                    value="1.2M"
-                    trend="+5.4% last 30 days"
-                    icon={<Users className="h-5 w-5 text-white/50" />}
-                />
-                <MetricCard
-                    title="Avg Watch Time"
-                    value="48m"
-                    trend="+2m vs last week"
-                    icon={<Clock className="h-5 w-5 text-white/50" />}
-                />
-                <MetricCard
-                    title="Peak Viewers"
-                    value="15.4K"
-                    trend="Easter Sunday"
-                    trendType="neutral"
-                    icon={<TrendingUp className="h-5 w-5 text-white/50" />}
-                />
-            </div>
-
-            {/* Main Content Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-8">
-                {/* Recent Streams */}
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-bold">Recent Streams</h2>
-                        <Link href="/analytics" className="text-xs font-medium bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-white/70 transition-colors">
-                            View Analytics
+        <>
+            <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold text-white">Media Dashboard</h1>
+                        <p className="text-white/50 mt-1">Recent replays, scheduled services, and publishing tools.</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={handleSyncMux}
+                            disabled={syncing}
+                            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-lg font-medium transition-all text-sm"
+                        >
+                            {syncing ? "Syncing..." : "Sync Mux"}
+                        </button>
+                        <Link href="/create" className="flex items-center gap-2 bg-[#A828FF] hover:bg-[#9222de] text-white px-6 py-3 rounded-lg font-bold transition-all">
+                            <Radio className="h-4 w-4" />
+                            Go Live
                         </Link>
                     </div>
+                </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <MetricCard label="Total Services" value={stats?.totalLiveServices || "--"} />
+                    <MetricCard label="Total Viewers" value={stats?.totalViewers || "--"} />
+                    <MetricCard label="Avg Watch Time" value={stats?.avgWatchTime || "--"} />
+                    <MetricCard label="Scheduled" value={stats?.scheduledServices || "--"} />
+                </div>
+
+                {lastAutoUpdated ? (
+                    <p className="text-xs text-white/40">Auto-updated {lastAutoUpdated.toLocaleTimeString()}</p>
+                ) : null}
+
+                <section className="rounded-2xl border border-white/10 bg-[#111111] p-6 space-y-4">
+                    <h2 className="text-xl font-bold text-white">Recent Streams</h2>
+                    {loading ? <p className="text-white/50">Loading recent streams...</p> : null}
                     <div className="space-y-3">
-                        <StreamItem
-                            title="Sunday Service: The Power of Praise"
-                            date="Jan 14, 2026"
-                            viewers="1,840"
-                            duration="2h 15m"
-                            status="completed"
-                        />
-                        <StreamItem
-                            title="Mid-Week Bible Study"
-                            date="Jan 10, 2026"
-                            viewers="856"
-                            duration="1h 30m"
-                            status="completed"
-                        />
-                        <StreamItem
-                            title="Worship Night Special"
-                            date="Jan 07, 2026"
-                            viewers="2,400"
-                            duration="3h 00m"
-                            status="completed"
-                        />
+                        {recentStreams.map((stream) => (
+                            <div key={stream.id} className="rounded-xl border border-white/8 bg-white/5 p-4 flex items-start justify-between gap-4">
+                                <div className="space-y-1">
+                                    <p className="text-white font-semibold">{stream.title}</p>
+                                    <p className="text-xs text-white/45">{new Date(stream.startTime).toLocaleString()} • {stream.chatCount} chat messages</p>
+                                    <p className="text-xs text-white/45">{stream.preacherName || "Davidic Generation Church"} • {stream.category || "Teaching"}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => {
+                                            setEditingReplayId(stream.id)
+                                            setReplayForm({
+                                                title: stream.title,
+                                                description: stream.description || "",
+                                                preacherName: stream.preacherName || "",
+                                                category: stream.category || "",
+                                                thumbnailUrl: stream.thumbnailUrl || "",
+                                                isPublished: stream.isPublished
+                                            })
+                                        }}
+                                        className="rounded-lg bg-white/5 p-2 text-white/70 hover:text-white"
+                                    >
+                                        <Pencil className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(stream.id, "recent")}
+                                        className="rounded-lg bg-white/5 p-2 text-red-400 hover:text-red-300"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                </div>
+                </section>
 
-                {/* Scheduled Services */}
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-bold">Scheduled Services</h2>
-                        <Link href="/create" className="text-xs font-medium bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded text-white/70 transition-colors">
-                            Schedule New
-                        </Link>
+                <section className="rounded-2xl border border-white/10 bg-[#111111] p-6 space-y-4">
+                    <h2 className="text-xl font-bold text-white">Scheduled Services</h2>
+                    <div className="space-y-3">
+                        {scheduledServices.map((service) => (
+                            <div key={service.id} className="rounded-xl border border-white/8 bg-white/5 p-4 flex items-start justify-between gap-4">
+                                <div className="space-y-1">
+                                    <p className="text-white font-semibold">{service.title}</p>
+                                    <p className="text-xs text-white/45">{new Date(service.startTime).toLocaleString()}</p>
+                                    <p className="text-xs text-white/45">{service.preacherName || "Davidic Generation Church"} • {service.category || "Service"}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => handleSendReminder(service.id)}
+                                        className="rounded-lg bg-white/5 p-2 text-brand-purple hover:text-white"
+                                    >
+                                        <BellRing className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(service.id, "scheduled")}
+                                        className="rounded-lg bg-white/5 p-2 text-red-400 hover:text-red-300"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
                     </div>
+                </section>
 
-                    <div className="bg-[#111111] border border-white/5 rounded-2xl p-4 space-y-4">
-                        <ScheduledItem
-                            title="Sunday Service"
-                            date="Jan 21, 2026 • 9:00 AM"
-                            status="upcoming"
-                        />
-                        <ScheduledItem
-                            title="Leaders Meeting"
-                            date="Jan 23, 2026 • 6:00 PM"
-                            status="private"
-                        />
+                <section className="rounded-2xl border border-white/10 bg-[#111111] p-6 space-y-4">
+                    <h2 className="text-xl font-bold text-white">Broadcast Audit</h2>
+                    <div className="space-y-3">
+                        {auditLogs.map((log) => (
+                            <div key={log.id} className="rounded-xl border border-white/8 bg-white/5 p-4">
+                                <p className="text-white font-medium">{log.summary}</p>
+                                <p className="text-xs text-white/45 mt-1">{log.action} • {new Date(log.createdAt).toLocaleString()}</p>
+                            </div>
+                        ))}
                     </div>
-                </div>
+                </section>
+
+                {editingReplayId ? (
+                    <section className="rounded-2xl border border-white/10 bg-[#111111] p-6 space-y-4">
+                        <h2 className="text-xl font-bold text-white">Edit Replay</h2>
+                        <input value={replayForm.title} onChange={(e) => setReplayForm((prev) => ({ ...prev, title: e.target.value }))} className="w-full rounded-lg bg-black/40 border border-white/10 px-4 py-3 text-white" placeholder="Title" />
+                        <textarea value={replayForm.description} onChange={(e) => setReplayForm((prev) => ({ ...prev, description: e.target.value }))} className="w-full rounded-lg bg-black/40 border border-white/10 px-4 py-3 text-white min-h-28" placeholder="Description" />
+                        <input value={replayForm.preacherName} onChange={(e) => setReplayForm((prev) => ({ ...prev, preacherName: e.target.value }))} className="w-full rounded-lg bg-black/40 border border-white/10 px-4 py-3 text-white" placeholder="Preacher name" />
+                        <input value={replayForm.category} onChange={(e) => setReplayForm((prev) => ({ ...prev, category: e.target.value }))} className="w-full rounded-lg bg-black/40 border border-white/10 px-4 py-3 text-white" placeholder="Category" />
+                        <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-2 text-sm text-white/70">
+                                <input type="checkbox" checked={replayForm.isPublished} onChange={(e) => setReplayForm((prev) => ({ ...prev, isPublished: e.target.checked }))} />
+                                Published
+                            </label>
+                            <label className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/70 cursor-pointer">
+                                <Upload className="h-4 w-4" />
+                                Upload thumbnail
+                                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                    const file = e.target.files?.[0]
+                                    if (file) {
+                                        void handleReplayThumbnailUpload(file)
+                                    }
+                                }} />
+                            </label>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button onClick={handleSaveReplay} disabled={isSavingReplay} className="rounded-lg bg-brand-purple px-4 py-2 text-white font-semibold">
+                                {isSavingReplay ? "Saving..." : "Save replay"}
+                            </button>
+                            <button onClick={() => setEditingReplayId(null)} className="rounded-lg border border-white/10 px-4 py-2 text-white/70">
+                                Cancel
+                            </button>
+                        </div>
+                    </section>
+                ) : null}
             </div>
-        </div>
+
+            {toast && <Toast message={toast.message} type={toast.type} onClose={closeToast} />}
+        </>
     )
 }
 
-// Reuse existing component definitions
-function MetricCard({ title, value, trend, trendType = "positive", icon }: { title: string, value: string, trend: string, trendType?: "positive" | "neutral", icon: React.ReactNode }) {
+function MetricCard({ label, value }: { label: string; value: string }) {
     return (
-        <div className="bg-[#111111] p-5 rounded-2xl border border-white/5 flex flex-col justify-between h-[140px] hover:border-white/10 transition-colors">
-            <div className="flex justify-between items-start">
-                <span className="text-sm text-white/50 font-medium">{title}</span>
-                <div className="p-2 bg-white/5 rounded-full">
-                    {icon}
-                </div>
-            </div>
-            <div>
-                <h3 className="text-3xl font-bold text-white mb-2">{value}</h3>
-                <div className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${trendType === 'positive' ? 'bg-green-500/10 text-green-500' : 'bg-white/10 text-white/60'}`}>
-                    {trendType === 'positive' && <ArrowUpRight className="h-3 w-3 mr-1" />}
-                    {trend}
-                </div>
-            </div>
-        </div>
-    )
-}
-
-function StreamItem({ title, date, viewers, duration, status }: { title: string, date: string, viewers: string, duration: string, status: string }) {
-    return (
-        <div className="group flex items-center justify-between p-4 bg-[#111111] border border-white/5 rounded-xl hover:border-[#A828FF]/50 transition-all cursor-pointer">
-            <div className="flex items-center gap-4">
-                <div className="h-12 w-20 bg-zinc-800 rounded-lg flex items-center justify-center relative overflow-hidden">
-                    <Video className="h-5 w-5 text-white/20" />
-                    <div className="absolute inset-0 bg-black/40 hidden group-hover:flex items-center justify-center">
-                        <Play className="h-4 w-4 text-white fill-white" />
-                    </div>
-                </div>
-                <div>
-                    <h3 className="font-bold text-white group-hover:text-[#A828FF] transition-colors">{title}</h3>
-                    <div className="flex items-center gap-3 text-xs text-white/40 mt-1">
-                        <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {date}</span>
-                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {duration}</span>
-                    </div>
-                </div>
-            </div>
-            <div className="text-right">
-                <div className="flex items-center justify-end gap-1 text-sm font-bold text-white">
-                    <Eye className="h-4 w-4 text-white/40" />
-                    {viewers}
-                </div>
-                <span className="text-xs text-green-500 font-medium capitalize">{status}</span>
-            </div>
-        </div>
-    )
-}
-
-function ScheduledItem({ title, date, status }: { title: string, date: string, status: string }) {
-    return (
-        <div className="flex items-center justify-between p-3 rounded-lg hover:bg-white/5 transition-colors">
-            <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-[#1A1A1A] flex items-center justify-center text-white/50 border border-white/5">
-                    <Calendar className="h-5 w-5" />
-                </div>
-                <div>
-                    <h4 className="font-bold text-sm text-white">{title}</h4>
-                    <p className="text-xs text-white/40">{date}</p>
-                </div>
-            </div>
-            <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${status === 'upcoming' ? 'bg-[#A828FF]/10 text-[#A828FF]' : 'bg-white/5 text-white/40'}`}>
-                {status}
-            </div>
+        <div className="rounded-2xl border border-white/10 bg-[#111111] p-5">
+            <p className="text-xs uppercase tracking-[0.2em] text-white/40">{label}</p>
+            <p className="mt-3 text-2xl font-bold text-white">{value}</p>
         </div>
     )
 }

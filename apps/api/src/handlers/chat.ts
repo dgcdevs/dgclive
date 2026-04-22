@@ -4,14 +4,29 @@ import { AuthRequest } from '../middleware/requireAuth';
 import { StreamChat } from 'stream-chat';
 import { io } from '../index';
 
-// Send a Message ("Amen!")
 export const sendMessage = async (req: AuthRequest, res: Response) => {
     try {
         const { text, eventId } = req.body;
         const userId = req.user.id;
 
-        if (!text || !eventId) {
-            res.status(400).json({ error: "Message and Event ID are required" });
+        if (activeMute && (!activeMute.expiresAt || activeMute.expiresAt.getTime() > Date.now())) {
+            res.status(403).json({
+                error: activeMute.expiresAt
+                    ? `You are muted in this room until ${activeMute.expiresAt.toISOString()}.`
+                    : "You are muted in this room."
+            });
+            return;
+        }
+
+        if (
+            roomSettings.slowModeSeconds > 0 &&
+            !isModerator(profile.role) &&
+            lastMessage &&
+            Date.now() - lastMessage.createdAt.getTime() < roomSettings.slowModeSeconds * 1000
+        ) {
+            res.status(429).json({
+                error: `Slow mode is active. Please wait ${roomSettings.slowModeSeconds} seconds between messages.`
+            });
             return;
         }
 
@@ -28,18 +43,22 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
 
         const message = await prisma.chatMessage.create({
             data: {
-                text,
+                text: trimmedText,
+                roomKey: target.roomKey,
                 profileId: userId,
-                eventId: eventId
+                ...(target.eventId ? { eventId: target.eventId } : {}),
+                ...(target.youtubeVideoId ? { youtubeVideoId: target.youtubeVideoId } : {})
             },
             include: {
                 profile: { select: { fullName: true, role: true } }
             }
         });
 
-        res.status(201).json(message);
+        io.to(target.roomKey).emit('new-chat-message', message);
 
+        res.status(201).json(message);
     } catch (error) {
+        console.error("Failed to send message", error);
         res.status(500).json({ error: "Failed to send message" });
     }
 };
@@ -51,6 +70,13 @@ export const getMessages = async (req: any, res: Response) => {
     const offset = parseInt(req.query.offset || "0");
 
     try {
+        const target = await resolveRoomTarget({ eventId, youtubeVideoId });
+        if (!target) {
+            res.status(400).json({ error: "Either eventId or youtubeVideoId is required" });
+            return;
+        }
+
+        const roomSettings = await ensureRoomSettings(target);
         const messages = await prisma.chatMessage.findMany({
             where: { eventId },
             orderBy: { createdAt: 'asc' },
@@ -65,7 +91,20 @@ export const getMessages = async (req: any, res: Response) => {
 
         res.json({ messages, total, limit, offset });
 
+        res.json({
+            messages: messages.reverse(),
+            pageInfo: {
+                limit,
+                hasMore: messages.length === limit,
+                nextCursor: messages.length > 0 ? messages[messages.length - 1].createdAt.toISOString() : null
+            },
+            settings: roomSettings,
+            mute: activeMute && (!activeMute.expiresAt || activeMute.expiresAt.getTime() > Date.now())
+                ? activeMute
+                : null
+        });
     } catch (error) {
+        console.error("Failed to fetch messages", error);
         res.status(500).json({ error: "Failed to fetch messages" });
     }
 };

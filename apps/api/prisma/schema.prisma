@@ -19,7 +19,60 @@ enum Role {
 enum NotificationType {
   UPCOMING_SERVICE
   LIVESTREAM_STARTED
+  STREAM_DELAYED
+  STREAM_ENDED
   NEW_VIDEO
+  NEW_SCHEDULE_POSTED
+}
+
+enum ReactionType {
+  LIKE
+  PRAISE
+  FIRE
+  PRAYING
+}
+
+enum BroadcastAuditAction {
+  STREAM_CONFIG_VIEWED
+  STREAM_SCHEDULED
+  STREAM_PUBLISHED
+  STREAM_UNPUBLISHED
+  STREAM_ENDED
+  STREAM_RESCHEDULED
+  STREAM_REMINDER_SENT
+}
+
+enum EventRecurrence {
+  NONE
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum EventEditorialStatus {
+  DRAFT
+  SCHEDULED
+  READY
+  LIVE
+  ENDED
+  ARCHIVED
+  CANCELLED
+}
+
+enum ChatModerationStatus {
+  VISIBLE
+  FLAGGED
+  REMOVED
+}
+
+enum ChatModerationActionType {
+  MESSAGE_FLAGGED
+  MESSAGE_RESTORED
+  MESSAGE_REMOVED
+  USER_MUTED
+  USER_UNMUTED
+  ROOM_SETTINGS_UPDATED
 }
 
 // 2. Profile (Matches Supabase Auth)
@@ -33,10 +86,20 @@ model Profile {
   createdAt DateTime @default(now())
 
   // Relationships
-  inviteId  String?  @unique
-  invite    GlobalInvite? @relation(fields: [inviteId], references: [id])
-  messages  ChatMessage[]
-  notifications Notification[]
+  inviteId                 String?               @unique
+  invite                   GlobalInvite?         @relation(fields: [inviteId], references: [id])
+  messages                 ChatMessage[]         @relation("ChatMessageAuthor")
+  flaggedMessages          ChatMessage[]         @relation("ChatMessageFlaggedBy")
+  reviewedMessages         ChatMessage[]         @relation("ChatMessageReviewedBy")
+  deletedMessages          ChatMessage[]         @relation("ChatMessageDeletedBy")
+  notifications            Notification[]
+  contentReactions         ContentReaction[]
+  watchSessions            WatchSession[]
+  broadcastAuditLogs       BroadcastAuditLog[]
+  chatRoomMutes            ChatRoomMute[]        @relation("ChatMuteTarget")
+  issuedChatRoomMutes      ChatRoomMute[]        @relation("ChatMuteIssuedBy")
+  chatModerationActions    ChatModerationAction[] @relation("ChatModerationActor")
+  chatModerationTargets    ChatModerationAction[] @relation("ChatModerationTarget")
 }
 
 // 3. The "Church Entry" Ticket (PRD 6.1)
@@ -54,13 +117,20 @@ model GlobalInvite {
 // 4. The Livestream Service (PRD 6.2)
 // Renamed 'Event' to 'Livestream' for clarity, or keep 'Event' if you prefer.
 model Event {
-  id          String   @id @default(uuid())
-  title       String
-  description String?
-  startTime   DateTime
-  isPublic    Boolean  @default(false) // If false, only Members can watch
-  isLive      Boolean  @default(false)
-  isPublished Boolean  @default(false) // Published to members/public (separate from isLive)
+  id                     String               @id @default(uuid())
+  title                  String
+  description            String?
+  startTime              DateTime
+  isPublic               Boolean              @default(false) // If false, only Members can watch
+  isLive                 Boolean              @default(false)
+  isPublished            Boolean              @default(false) // Published to members/public (separate from isLive)
+  preacherName           String?
+  category               String?
+  scheduleSeriesId       String?
+  recurrenceRule         EventRecurrence      @default(NONE)
+  editorialStatus        EventEditorialStatus @default(DRAFT)
+  countdownEnabled       Boolean              @default(true)
+  countdownOffsetMinutes Int                  @default(30)
 
   // --- MUX VIDEO DATA (Critical Addition) ---
   muxPlaybackId String? // For the Frontend Player
@@ -70,22 +140,106 @@ model Event {
   thumbnailUrl  String? // <--- Uploaded by User
 
   // --- INTERACTION ---
-  chatMessages ChatMessage[]
+  chatMessages           ChatMessage[]
+  reactions              ContentReaction[]
+  watchSessions          WatchSession[]
+  broadcastAuditLogs     BroadcastAuditLog[]
+  chatRoomSettings       ChatRoomSettings?
+  chatRoomMutes          ChatRoomMute[]
+  chatModerationActions  ChatModerationAction[]
+
+  @@index([startTime])
+  @@index([isLive, startTime])
+  @@index([isPublished, startTime])
+  @@index([muxAssetId, startTime])
 }
 
 // 5. Chat & Comments (PRD 6.3)
 model ChatMessage {
-  id        String   @id @default(uuid())
-  text      String
-  createdAt DateTime @default(now())
+  id               String               @id @default(uuid())
+  text             String
+  roomKey          String
+  moderationStatus ChatModerationStatus @default(VISIBLE)
+  flaggedReason    String?
+  flaggedAt        DateTime?
+  reviewedAt       DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime             @default(now())
 
   // Who sent it?
-  profileId String
-  profile   Profile @relation(fields: [profileId], references: [id])
+  profileId    String
+  profile      Profile  @relation("ChatMessageAuthor", fields: [profileId], references: [id])
+  flaggedById  String?
+  flaggedBy    Profile? @relation("ChatMessageFlaggedBy", fields: [flaggedById], references: [id], onDelete: SetNull)
+  reviewedById String?
+  reviewedBy   Profile? @relation("ChatMessageReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  deletedById  String?
+  deletedBy    Profile? @relation("ChatMessageDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
 
-  // Which Event?
-  eventId   String
-  event     Event   @relation(fields: [eventId], references: [id])
+  // Which Event or archive video?
+  eventId        String?
+  event          Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  youtubeVideoId String?
+  youtubeVideo   YouTubeVideo? @relation(fields: [youtubeVideoId], references: [id], onDelete: SetNull)
+  moderationActions ChatModerationAction[]
+
+  @@index([roomKey, createdAt])
+  @@index([moderationStatus, flaggedAt])
+}
+
+model ChatRoomSettings {
+  id              String   @id @default(uuid())
+  roomKey         String   @unique
+  chatEnabled     Boolean  @default(true)
+  slowModeSeconds Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  eventId         String?  @unique
+  event           Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  youtubeVideoId  String?  @unique
+  youtubeVideo    YouTubeVideo? @relation(fields: [youtubeVideoId], references: [id], onDelete: Cascade)
+}
+
+model ChatRoomMute {
+  id             String   @id @default(uuid())
+  roomKey        String
+  reason         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  expiresAt      DateTime?
+  profileId      String
+  profile        Profile  @relation("ChatMuteTarget", fields: [profileId], references: [id], onDelete: Cascade)
+  mutedById      String
+  mutedBy        Profile  @relation("ChatMuteIssuedBy", fields: [mutedById], references: [id], onDelete: Cascade)
+  eventId        String?
+  event          Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  youtubeVideoId String?
+  youtubeVideo   YouTubeVideo? @relation(fields: [youtubeVideoId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, roomKey])
+  @@index([roomKey, expiresAt])
+}
+
+model ChatModerationAction {
+  id              String                   @id @default(uuid())
+  type            ChatModerationActionType
+  roomKey         String
+  reason          String?
+  createdAt       DateTime                 @default(now())
+  metadata        Json?
+  actorId         String
+  actor           Profile                  @relation("ChatModerationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  targetProfileId String?
+  targetProfile   Profile?                 @relation("ChatModerationTarget", fields: [targetProfileId], references: [id], onDelete: SetNull)
+  messageId       String?
+  message         ChatMessage?             @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  eventId         String?
+  event           Event?                   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  youtubeVideoId  String?
+  youtubeVideo    YouTubeVideo?            @relation(fields: [youtubeVideoId], references: [id], onDelete: Cascade)
+
+  @@index([roomKey, createdAt])
+  @@index([type, createdAt])
 }
 
 // 5.5. Notifications (Real-time alerts)
@@ -134,7 +288,66 @@ model YouTubeVideo {
   syncedAt      DateTime @default(now())
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  chatMessages  ChatMessage[]
+  reactions     ContentReaction[]
+  watchSessions WatchSession[]
+  chatRoomSettings ChatRoomSettings?
+  chatRoomMutes ChatRoomMute[]
+  chatModerationActions ChatModerationAction[]
 
   @@index([publishedAt])
+}
+
+model ContentReaction {
+  id             String        @id @default(uuid())
+  type           ReactionType
+  createdAt      DateTime      @default(now())
+  profileId      String
+  profile        Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  eventId        String?
+  event          Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  youtubeVideoId String?
+  youtubeVideo   YouTubeVideo? @relation(fields: [youtubeVideoId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, type])
+  @@index([youtubeVideoId, type])
+  @@index([profileId, type])
+  @@unique([profileId, eventId, type])
+  @@unique([profileId, youtubeVideoId, type])
+}
+
+model WatchSession {
+  id               String        @id @default(uuid())
+  sessionKey       String        @unique
+  startedAt        DateTime      @default(now())
+  lastSeenAt       DateTime      @default(now())
+  endedAt          DateTime?
+  totalWatchSeconds Int          @default(0)
+  profileId        String
+  profile          Profile       @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  eventId          String?
+  event            Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  youtubeVideoId   String?
+  youtubeVideo     YouTubeVideo? @relation(fields: [youtubeVideoId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, startedAt])
+  @@index([youtubeVideoId, startedAt])
+  @@index([profileId, startedAt])
+}
+
+model BroadcastAuditLog {
+  id          String               @id @default(uuid())
+  action      BroadcastAuditAction
+  createdAt   DateTime             @default(now())
+  actorId     String
+  actor       Profile              @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  eventId     String?
+  event       Event?               @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  summary     String
+  metadata    Json?
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([eventId, createdAt])
 }
 

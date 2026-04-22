@@ -1,7 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import 'dotenv/config';
 
 // We use the Service Role Key to bypass security (Admin Mode)
 export const supabaseAdmin = createClient(

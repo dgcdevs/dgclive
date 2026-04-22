@@ -4,6 +4,14 @@
 export const dynamic = 'force-dynamic'
 
 import { VideoPlayer } from "../../../components/video-player"
+import { LiveChat } from "../../../components/live-chat"
+import { Share2, Heart, Hand, Zap, Sparkles, Check } from "lucide-react"
+import { useEffect, useState } from "react"
+import { useParams, useSearchParams } from "next/navigation"
+import Image from "next/image"
+import LogoImage from "@/assets/images/dgclivelogo.png"
+import { useAuth } from "@/lib/useAuth"
+import { useSocket } from "@/lib/socket-context"
 import { ChatContainer } from "../../../components/chat"
 import { LoadingSpinner } from "../../../components/LoadingSpinner"
 import { useUser } from "@/lib/use-user"
@@ -44,7 +52,9 @@ export default function WatchPage() {
     // Live stream state
     const [isLive, setIsLive] = useState(false)
     const [isPublished, setIsPublished] = useState(false)
-    const socketRef = useRef<Socket | null>(null)
+
+    const { token } = useAuth()
+    const { socket } = useSocket()
 
     const handleShare = async () => {
         try {
@@ -62,7 +72,6 @@ export default function WatchPage() {
                 setIsLoading(true)
                 setErrorMessage("")
 
-                const token = localStorage.getItem("token")
                 if (!token) {
                     setErrorMessage("Missing authentication token")
                     return
@@ -84,7 +93,7 @@ export default function WatchPage() {
                 setIsPublished(data.isPublished || false)
 
                 // Increment view count
-                void fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${data.id}/view`, {
+                void fetch(`${process.env.NEXT_PUBLIC_API_URL}/content/events/${data.id}/view?source=${source}`, {
                     method: "POST",
                     headers: { Authorization: `Bearer ${token}` }
                 });
@@ -97,50 +106,48 @@ export default function WatchPage() {
         }
 
         void loadVideo()
-    }, [params.id, source])
+    }, [params.id, source, token])
 
     useEffect(() => {
-        if (!video || source !== "mux") return;
+        if (!video || source !== "mux" || !socket) return;
 
-        if (!socketRef.current) {
-            const socket = io(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001");
-            socketRef.current = socket;
+        socket.emit("join-room", video.id);
 
-            socket.emit("join-room", video.id);
-
-            socket.on("STREAM_PUBLISHED", (payload: any) => {
-                if (payload.eventId === video.id || !payload.eventId) {
-                    setIsPublished(true);
-                }
-            });
-
-            socket.on("STREAM_UNPUBLISHED", (payload: any) => {
-                if (payload.eventId === video.id || !payload.eventId) {
-                    setIsPublished(false);
-                }
-            });
-
-            socket.on("STREAM_ENDED", (payload: any) => {
-                if (payload.eventId === video.id || !payload.eventId) {
-                    setIsLive(false);
-                    // Retain isPublished state
-                }
-            });
-
-            // Legacy fallbacks
-            socket.on("stream-status-changed", (payload: any) => {
-                if (payload.isLive !== undefined) setIsLive(payload.isLive);
-                if (payload.isPublished !== undefined) setIsPublished(payload.isPublished);
-            });
-        }
-
-        return () => {
-            if (socketRef.current) {
-                socketRef.current.disconnect();
-                socketRef.current = null;
+        const handlePublished = (payload: any) => {
+            if (payload.eventId === video.id || !payload.eventId) {
+                setIsPublished(true);
             }
         };
-    }, [video, source]);
+
+        const handleUnpublished = (payload: any) => {
+            if (payload.eventId === video.id || !payload.eventId) {
+                setIsPublished(false);
+            }
+        };
+
+        const handleEnded = (payload: any) => {
+            if (payload.eventId === video.id || !payload.eventId) {
+                setIsLive(false);
+            }
+        };
+
+        const handleStatusChanged = (payload: any) => {
+            if (payload.isLive !== undefined) setIsLive(payload.isLive);
+            if (payload.isPublished !== undefined) setIsPublished(payload.isPublished);
+        };
+
+        socket.on("STREAM_PUBLISHED", handlePublished);
+        socket.on("STREAM_UNPUBLISHED", handleUnpublished);
+        socket.on("STREAM_ENDED", handleEnded);
+        socket.on("stream-status-changed", handleStatusChanged);
+
+        return () => {
+            socket.off("STREAM_PUBLISHED", handlePublished);
+            socket.off("STREAM_UNPUBLISHED", handleUnpublished);
+            socket.off("STREAM_ENDED", handleEnded);
+            socket.off("stream-status-changed", handleStatusChanged);
+        };
+    }, [video, source, socket]);
 
     if (isLoading) {
         return <div className="flex items-center justify-center min-h-screen"><LoadingSpinner size="lg" message="Loading video..." /></div>
