@@ -164,6 +164,10 @@ export default function AuthPage() {
 			const data = await res.json()
 			if (!res.ok) throw new Error(data.error || "Authentication failed")
 
+			// Clear any stale tokens before storing new ones
+			localStorage.removeItem("token")
+			localStorage.removeItem("user")
+			
 			localStorage.setItem("token", data.token)
 			localStorage.setItem("user", JSON.stringify(data.user))
 			router.push("/dashboard")

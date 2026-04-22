@@ -44,6 +44,9 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
 		// 1. Verify Token with Supabase
 		const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 		if (error) {
+			// Remove from cache immediately if it fails (token is stale or invalid)
+			tokenCache.delete(token);
+			
 			// Debug: decode token payload to see expiration
 			try {
 				const parts = token.split('.');
