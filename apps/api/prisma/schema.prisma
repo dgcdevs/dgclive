@@ -77,12 +77,13 @@ enum ChatModerationActionType {
 
 // 2. Profile (Matches Supabase Auth)
 model Profile {
-  id                String    @id // Maps to Supabase Auth ID
-  email             String    @unique
-  fullName          String
-  role              Role      @default(MEMBER)
-  isBanned          Boolean   @default(false) // banned from chat
-  createdAt         DateTime  @default(now())
+  id        String   @id // Maps to Supabase Auth ID
+  email     String   @unique
+  fullName  String
+  role      Role     @default(MEMBER)
+  isBanned  Boolean  @default(false) // Platform-wide ban
+  chatBanned Boolean? @default(false) // Chat-specific mute/ban (nullable for backwards compatibility)
+  createdAt DateTime @default(now())
 
   // Relationships
   inviteId                 String?               @unique

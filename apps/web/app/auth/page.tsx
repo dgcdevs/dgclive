@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { Button } from "../components/ui/button"
@@ -9,15 +9,25 @@ import { Label } from "../components/ui/label"
 import { Logo } from "../components/logo"
 import { Check, Mail, Lock, Eye, EyeOff, User, AlertCircle } from "lucide-react"
 import BokehDots from "../components/BokehDots"
+import { useAuth } from "../../lib/useAuth"
 
 type SignupStep = "form" | "verification" | "error"
 type ForgotPasswordStep = "email" | "code" | null
 
 export default function AuthPage() {
+	const router = useRouter()
+	const { token } = useAuth()
+
+	// Redirect authenticated users to dashboard
+	useEffect(() => {
+		if (token) {
+			router.push("/dashboard")
+		}
+	}, [token, router])
+
 	const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin")
 	const [signupStep, setSignupStep] = useState<SignupStep>("form")
 	const [forgotPasswordStep, setForgotPasswordStep] = useState<ForgotPasswordStep>(null)
-	const router = useRouter()
 	const [isLoading, setIsLoading] = useState(false)
 	const [showPassword, setShowPassword] = useState(false)
 	const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -373,10 +383,12 @@ export default function AuthPage() {
 
 									<Button
 										type="submit"
-										disabled={isLoading || formData.verificationCode.length !== 6}
+										isLoading={isLoading}
+										disabled={formData.verificationCode.length !== 6}
 										className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+										loadingText="Verifying..."
 									>
-										{isLoading ? "Verifying..." : "Verify & Create Account"}
+										Verify & Create Account
 									</Button>
 
 									<Button
@@ -492,14 +504,13 @@ export default function AuthPage() {
 
 									<Button
 										type="submit"
-										disabled={isLoading}
-										className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
-									>
-										{isLoading
-											? "Processing..."
-											: activeTab === "signin"
-												? "Sign In"
-												: "Continue"}
+									isLoading={isLoading}
+									className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+									loadingText="Processing..."
+								>
+									{activeTab === "signin"
+										? "Sign In"
+										: "Continue"}
 									</Button>
 								</form>
 							)}
@@ -553,10 +564,12 @@ export default function AuthPage() {
 
 								<Button
 									type="submit"
-									disabled={isLoading || !forgotPasswordEmail}
+									isLoading={isLoading}
+									disabled={!forgotPasswordEmail}
 									className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+									loadingText="Sending..."
 								>
-									{isLoading ? "Sending..." : "Send Reset Code"}
+									Send Reset Code
 								</Button>
 							</form>
 						)}
@@ -617,10 +630,12 @@ export default function AuthPage() {
 
 								<Button
 									type="submit"
-									disabled={isLoading || formData.resetCode.length !== 6}
+									isLoading={isLoading}
+									disabled={formData.resetCode.length !== 6}
 									className="w-full bg-brand-purple hover:bg-brand-purple/90 h-12"
+									loadingText="Resetting..."
 								>
-									{isLoading ? "Resetting..." : "Reset Password"}
+									Reset Password
 								</Button>
 
 								<Button

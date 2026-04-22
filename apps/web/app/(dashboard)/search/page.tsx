@@ -4,6 +4,9 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search, SlidersHorizontal } from "lucide-react"
 import { VideoCard } from "@/app/components/video-card"
+import { LoadingSpinner } from "@/app/components/LoadingSpinner"
+import { InlineErrorMessage } from "@/app/components/InlineErrorMessage"
+import { SkeletonCard } from "@/app/components/SkeletonCard"
 
 type DiscoveryResult = {
     id: string

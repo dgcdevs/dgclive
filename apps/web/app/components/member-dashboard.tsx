@@ -9,6 +9,9 @@ import { SmallEventCard } from "./small-event-card"
 import { NewsletterBanner } from "./newsletter-banner"
 import { useAuth } from "@/lib/useAuth"
 import { useSocket } from "@/lib/socket-context"
+import { LoadingSpinner } from "./LoadingSpinner"
+import { InlineErrorMessage } from "./InlineErrorMessage"
+import { SkeletonCard } from "./SkeletonCard"
 
 type ArchiveVideo = {
     id: string
@@ -78,6 +81,7 @@ export function MemberDashboard() {
     const [isLoadingMore, setIsLoadingMore] = useState(false)
     const [liveStream, setLiveStream] = useState<DashboardHomeResponse["liveStream"]>(null)
     const [isLoadingLiveStream, setIsLoadingLiveStream] = useState(true)
+    const [liveStreamError, setLiveStreamError] = useState("")
 
     const loadDashboardHome = async () => {
         try {
@@ -89,6 +93,16 @@ export function MemberDashboard() {
 
             if (!token) {
                 setHasToken(false)
+            setLiveStreamError("")
+            const token = localStorage.getItem("token")
+            const headers: Record<string, string> = {}
+            if (token) headers.Authorization = `Bearer ${token}`
+
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
+            if (res.ok) {
+                const data = await res.json()
+                setLiveStream(data)
+            } else {
                 setLiveStream(null)
                 setScheduledServices([])
                 setArchives([])
@@ -118,7 +132,8 @@ export function MemberDashboard() {
             setBrowseTopics((data.discovery?.facets?.topics || []).slice(0, 6).map((item) => item.value))
             setBrowseCategories((data.discovery?.facets?.categories || []).slice(0, 5).map((item) => item.value))
         } catch (error) {
-            const message = error instanceof Error ? error.message : "Failed to load dashboard"
+            console.error("Failed to load live stream:", error)
+            setLiveStreamError("Failed to load live stream. Please try again.")
             setLiveStream(null)
             setArchiveError(message)
             setUpcomingError(message)
@@ -179,7 +194,16 @@ export function MemberDashboard() {
     return (
         <div className="space-y-12 pb-12">
             {isLoadingLiveStream ? (
-                <div className="animate-pulse h-[340px] bg-white/5 rounded-2xl w-full border border-white/5"></div>
+                <div className="space-y-4">
+                    <LoadingSpinner size="lg" message="Loading live stream..." />
+                    <div className="animate-pulse h-[340px] bg-white/5 rounded-2xl w-full border border-white/5"></div>
+                </div>
+            ) : liveStreamError ? (
+                <InlineErrorMessage
+                    error={liveStreamError}
+                    onDismiss={() => setLiveStreamError("")}
+                    onRetry={loadLiveStream}
+                />
             ) : liveStream && liveStream.isLive && liveStream.isPublished ? (
                 <section>
                     <div className="flex items-center gap-3 mb-6">
@@ -266,9 +290,16 @@ export function MemberDashboard() {
                 {!hasToken && !isLoadingArchives ? (
                     <p className="text-white/60">Sign in to access the sermon archive.</p>
                 ) : isLoadingArchives ? (
-                    <p className="text-white/60">Loading archives...</p>
+                    <div className="space-y-4">
+                        <LoadingSpinner size="md" message="Loading sermons..." />
+                        <SkeletonCard variant="video-card" count={3} className="grid grid-cols-1 md:grid-cols-3 gap-6 space-y-0" />
+                    </div>
                 ) : archiveError ? (
-                    <p className="text-red-400">{archiveError}</p>
+                    <InlineErrorMessage
+                        error={archiveError}
+                        onRetry={() => window.location.reload()}
+                        onDismiss={() => setArchiveError("")}
+                    />
                 ) : archives.length === 0 ? (
                     <p className="text-white/60">No archived sermons available yet.</p>
                 ) : (
@@ -301,9 +332,16 @@ export function MemberDashboard() {
                                 <button
                                     onClick={handleLoadMore}
                                     disabled={isLoadingMore}
-                                    className="px-8 py-3 bg-brand-purple hover:bg-brand-purple/90 disabled:bg-brand-purple/50 text-white font-bold rounded-lg transition-colors disabled:cursor-not-allowed"
+                                    className="px-8 py-3 bg-brand-purple hover:bg-brand-purple/90 disabled:bg-brand-purple/50 text-white font-bold rounded-lg transition-colors disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                 >
-                                    {isLoadingMore ? "Loading..." : "Load More"}
+                                    {isLoadingMore ? (
+                                        <>
+                                            <LoadingSpinner size="sm" />
+                                            Loading...
+                                        </>
+                                    ) : (
+                                        "Load More"
+                                    )}
                                 </button>
                             </div>
                         )}

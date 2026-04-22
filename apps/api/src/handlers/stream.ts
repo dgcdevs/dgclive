@@ -1,4 +1,5 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
+import { AuthRequest } from '../middleware/requireAuth';
 import { mux } from '../lib/mux';
 import { prisma } from '../lib/prisma';
 import { notifyAllMembers } from '../lib/notifications';
@@ -213,6 +214,50 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             ?? (normalizedRecurrenceRule !== 'NONE' ? `series-${Date.now()}` : null);
         const editorialStatus = resolveEditorialStatus(scheduledDate, isScheduled);
 
+        // 1.5. CHECK FOR EXISTING INACTIVE EVENT (Reuse stream key if stopped)
+        // This allows media to stop/start without reconfiguring OBS
+        const existingEvent = await prisma.event.findFirst({
+            where: {
+                isLive: false, // Not currently live
+                isPublished: false, // Not published to viewers
+                muxStreamKey: { not: null } // Has valid stream key
+            },
+            orderBy: { startTime: 'desc' } // Get most recent
+        });
+
+        // If we found a recent inactive event, reuse it
+        if (existingEvent && existingEvent.muxStreamKey && existingEvent.muxPlaybackId) {
+            console.log(`[Stream Reuse] Reusing existing stream ${existingEvent.id} - same keys`);
+            
+            const updatedEvent = await prisma.event.update({
+                where: { id: existingEvent.id },
+                data: {
+                    isLive: true,
+                    title, // Update title if provided
+                    ...(description && { description }),
+                    ...(thumbnailUrl && { thumbnailUrl }),
+                    startTime: scheduledStartTime ? new Date(scheduledStartTime) : new Date()
+                }
+            });
+
+            // Initialize heartbeat tracking for disconnect detection
+            const { streamHeartbeats } = await import('../index');
+            streamHeartbeats.set(updatedEvent.id, {
+                timestamp: Date.now(),
+                userId: req.user!.id,
+                recoveryEnd: Date.now() + (2 * 60 * 1000)
+            });
+
+            return res.status(201).json({
+                message: "Stream reused (same key)",
+                streamKey: updatedEvent.muxStreamKey,
+                playbackId: updatedEvent.muxPlaybackId,
+                eventId: updatedEvent.id,
+                reused: true
+            });
+        }
+
+        // Otherwise, create a new stream
         let liveStream: any;
 
         try {
@@ -309,8 +354,18 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                 console.error('[Notifications] Failed to notify members of scheduled service:', notifError);
             }
         }
+        // Note: Do NOT notify members here! Only notify when stream is explicitly published.
+        // This prevents the auth gate bypass where viewers get notifications before publication.
 
-        // 4. Return the Keys to the Producer Dashboard
+        // 4. Initialize heartbeat tracking for disconnect detection
+        const { streamHeartbeats } = await import('../index');
+        streamHeartbeats.set(newEvent.id, {
+            timestamp: Date.now(),
+            userId: req.user!.id,
+            recoveryEnd: Date.now() + (2 * 60 * 1000) // 2-minute recovery window starts now
+        });
+
+        // 5. Return the Keys to the Producer Dashboard
         res.status(201).json({
             message: isScheduled ? "Service scheduled successfully" : "Stream ready",
             streamKey: newEvent.muxStreamKey, // The Producer copies this to OBS
@@ -319,6 +374,7 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             isScheduled,
             lifecycleStage: isScheduled ? 'scheduled' : 'ready',
             editorialStatus: newEvent.editorialStatus
+            reused: false
         });
 
     } catch (error: any) {
@@ -354,6 +410,25 @@ export const stopStream = async (req: AuthRequest, res: Response) => {
                 muxStreamKey: null,
                 editorialStatus: 'ENDED'
             }
+        // 1. Update Database: "Show's Over"
+        // - Clear stream key for new session on next start
+        // - Unpublish so viewers can't see this stream anymore
+        // - Mark as not live
+        const stream = await prisma.event.update({
+            where: { id: eventId },
+            data: { 
+                isLive: false, // Stops showing "LIVE" badge
+                isPublished: false, // Hide stream from viewers (end the session)
+                muxStreamKey: null // Clear stream key - next start will generate a NEW key
+            }
+        });
+
+        // 2. Broadcast STREAM_ENDED to all viewers
+        // This notifies watchers that the stream has ended
+        io.emit("STREAM_ENDED", {
+            eventId,
+            reason: "media_stop",
+            message: "Stream has ended"
         });
 
         if (req.user?.id) {
@@ -894,5 +969,54 @@ export const getBroadcastAuditLog = async (req: AuthRequest, res: Response) => {
     } catch (error) {
         console.error("Broadcast audit log error:", error);
         res.status(500).json({ error: "Failed to load broadcast audit log" });
+    }
+};
+// Stream Heartbeat - Sent by media every 5 seconds to prevent auto-disconnect
+// This keeps the stream alive and resets the 2-minute recovery window
+export const streamHeartbeat = async (req: AuthRequest, res: Response) => {
+    try {
+        const { eventId } = req.body;
+
+        if (!eventId) {
+            res.status(400).json({ error: "Event ID is required" });
+            return;
+        }
+
+        // Verify stream exists
+        const stream = await prisma.event.findUnique({
+            where: { id: eventId }
+        });
+
+        if (!stream) {
+            res.status(404).json({ error: "Stream not found" });
+            return;
+        }
+
+        // Update heartbeat timestamp
+        const { streamHeartbeats } = await import('../index');
+        const heartbeat = streamHeartbeats.get(eventId);
+
+        if (heartbeat) {
+            // Update timestamp - media is still active
+            heartbeat.timestamp = Date.now();
+            // Reset recovery window - successful reconnect
+            heartbeat.recoveryEnd = Date.now() + (2 * 60 * 1000);
+        } else {
+            // Create new heartbeat if it doesn't exist (media reconnected)
+            streamHeartbeats.set(eventId, {
+                timestamp: Date.now(),
+                userId: req.user!.id,
+                recoveryEnd: Date.now() + (2 * 60 * 1000)
+            });
+        }
+
+        res.json({ 
+            message: "Heartbeat received",
+            heartbeatAt: new Date(),
+            recoveryWindowEnds: new Date(heartbeat?.recoveryEnd || Date.now() + (2 * 60 * 1000))
+        });
+    } catch (error) {
+        console.error("Stream Heartbeat Error:", error);
+        res.status(500).json({ error: "Failed to process heartbeat" });
     }
 };

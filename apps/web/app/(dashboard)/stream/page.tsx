@@ -4,8 +4,10 @@ import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Copy, Check, Clock, Video, MessageSquare, Heart, Settings, Wifi, WifiOff, ChevronDown, AlertTriangle, ShieldAlert } from "lucide-react"
 import { useUser } from "../../../lib/use-user"
-import { LiveChat } from "../../components/live-chat"
+import { ChatContainer } from "../../components/chat"
 import { Toast, useToast } from "../../components/ui/toast"
+import { LoadingSpinner } from "../../components/LoadingSpinner"
+import { InlineErrorMessage } from "../../components/InlineErrorMessage"
 import { io, Socket } from "socket.io-client"
 import MuxPlayer from "@mux/mux-player-react";
 
@@ -91,6 +93,7 @@ export default function ControlRoomPage() {
     const [mutedUsers, setMutedUsers] = useState<number>(0)
     const [isLoadingConfig, setIsLoadingConfig] = useState(true)
     const [streamError, setStreamError] = useState<{ message: string, code: string } | null>(null)
+    const [encoderError, setEncoderError] = useState<string | null>(null)
     const [socketConnected, setSocketConnected] = useState(false)
     const [showDiagnosticModal, setShowDiagnosticModal] = useState(false)
     const [showPublishModal, setShowPublishModal] = useState(false)
@@ -128,6 +131,7 @@ export default function ControlRoomPage() {
                 if (data.playbackId) {
                     setPlaybackId(data.playbackId);
                 }
+                setEncoderError(null); // Clear error on successful check
                 // Update obsStatus to 'live' when encoder is detected
                 if (data.isConnected) {
                     setIsLive(true);
@@ -138,7 +142,10 @@ export default function ControlRoomPage() {
                 }
                 console.log('[Encoder Status]', data);
             })
-            .catch(err => console.error('[Encoder Status] Error:', err))
+            .catch(err => {
+                console.error('[Encoder Status] Error:', err);
+                setEncoderError('Failed to check encoder status. Check your connection.');
+            })
             .finally(() => setCheckingEncoderStatus(false));
     });
 
@@ -505,6 +512,34 @@ export default function ControlRoomPage() {
         }
     }, [eventId]);
 
+    // ========================================
+    // HEARTBEAT: Send media alive signal every 5 seconds
+    // ========================================
+    // This prevents auto-disconnect and resets the recovery window
+    useEffect(() => {
+        if (!isPublished || !eventId) return;
+
+        const sendHeartbeat = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/heartbeat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ eventId })
+                });
+                console.log('[Heartbeat] Sent for stream:', eventId);
+            } catch (err) {
+                console.error('[Heartbeat] Error:', err);
+            }
+        };
+
+        // Send immediately, then every 5 seconds
+        sendHeartbeat();
+        const heartbeatInterval = setInterval(sendHeartbeat, 5000);
+
+        return () => clearInterval(heartbeatInterval);
+    }, [isPublished, eventId]);
+
     const handleStreamSettingUpdate = async (setting: { chatEnabled?: boolean, slowMode?: boolean }) => {
         if (!eventId) return;
         const previousState = { chatEnabled, slowMode };
@@ -819,8 +854,13 @@ export default function ControlRoomPage() {
                                     <Video className="h-10 w-10 text-white/30" />
                                 </div>
                                 <div>
-                                    <p className="text-white/80 font-semibold text-base">Waiting for Encoder Signal...</p>
+                                    <p className="text-white/80 font-semibold text-base">
+                                        {checkingEncoderStatus ? 'Checking Encoder Connection...' : 'Waiting for Encoder Signal...'}
+                                    </p>
                                     <p className="text-white/30 text-sm mt-1">When OBS starts streaming and Mux establishes a connection, this preview will activate automatically.</p>
+                                    {encoderError && (
+                                        <p className="text-red-400 text-xs mt-2 font-medium">{encoderError}</p>
+                                    )}
                                     <button
                                         onClick={() => setShowDiagnosticModal(true)}
                                         className="text-brand-purple hover:text-brand-purple/80 text-xs font-medium mt-2 underline underline-offset-4 decoration-current/30 hover:decoration-current"
@@ -829,10 +869,19 @@ export default function ControlRoomPage() {
                                     </button>
                                 </div>
                                 <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-800 border border-white/10">
-                                    <span className="h-2 w-2 rounded-full bg-white/20 animate-pulse" />
-                                    <span className="text-xs text-white/30 font-medium">
-                                        {obsStatus === 'connecting' ? 'CONNECTING TO MUX...' : socketConnected ? 'WAITING FOR OBS SIGNAL' : 'RECONNECTING TO SERVER...'}
-                                    </span>
+                                    {checkingEncoderStatus ? (
+                                        <>
+                                            <span className="h-2 w-2 rounded-full bg-yellow-400 animate-spin" />
+                                            <span className="text-xs text-yellow-300 font-medium">CHECKING ENCODER STATUS...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="h-2 w-2 rounded-full bg-white/20 animate-pulse" />
+                                            <span className="text-xs text-white/30 font-medium">
+                                                {obsStatus === 'connecting' ? 'CONNECTING TO MUX...' : socketConnected ? 'WAITING FOR OBS SIGNAL' : 'RECONNECTING TO SERVER...'}
+                                            </span>
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
@@ -876,8 +925,8 @@ export default function ControlRoomPage() {
                                 )}
                             </div>
 
-                            {/* ── LAYER 4: Go Live / Stop button (bottom-center) ── */}
-                            {isLive && obsStatus === 'live' && (
+                            {/* ── LAYER 4: Go Live button (bottom-center) ── */}
+                            {isLive && obsStatus === 'live' && !isPublished && (
                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
                                     {!isPublished ? (
                                         <button
@@ -916,6 +965,13 @@ export default function ControlRoomPage() {
                     {/* Start Stream Event Button — shown after key is generated */}
                     {masterStreamKey && (!eventId || lifecycleStage === 'ended' || lifecycleStage === 'archived') && (
                         <div className="mt-6 p-6 bg-gradient-to-br from-brand-purple/10 to-brand-purple/5 border border-brand-purple/20 rounded-2xl space-y-4">
+                            {streamError && (
+                                <InlineErrorMessage
+                                    error={streamError.message}
+                                    onDismiss={() => setStreamError(null)}
+                                    onRetry={handleStartStreamEvent}
+                                />
+                            )}
                             <div className="space-y-2">
                                 <h3 className="text-sm font-bold text-white">Ready to Stream?</h3>
                                 <p className="text-xs text-white/60 leading-relaxed">
@@ -930,9 +986,16 @@ export default function ControlRoomPage() {
                             <button
                                 onClick={handleStartStreamEvent}
                                 disabled={isLoadingConfig}
-                                className="w-full bg-brand-purple hover:bg-brand-purple/80 disabled:opacity-60 text-white font-bold py-3 px-4 rounded-lg transition-all text-sm"
+                                className="w-full bg-brand-purple hover:bg-brand-purple/80 disabled:opacity-60 text-white font-bold py-3 px-4 rounded-lg transition-all text-sm flex items-center justify-center gap-2"
                             >
-                                {isLoadingConfig ? "Creating Stream Event..." : "Start Stream Event"}
+                                {isLoadingConfig ? (
+                                    <>
+                                        <LoadingSpinner size="sm" />
+                                        Creating Stream Event...
+                                    </>
+                                ) : (
+                                    "Start Stream Event"
+                                )}
                             </button>
                         </div>
                     )}

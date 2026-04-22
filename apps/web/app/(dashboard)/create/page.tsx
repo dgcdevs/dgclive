@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import { useUser } from "../../../lib/use-user"
-
 const RECURRENCE_OPTIONS = [
     { value: "NONE", label: "One-time event" },
     { value: "DAILY", label: "Daily" },
@@ -14,6 +13,10 @@ const RECURRENCE_OPTIONS = [
     { value: "BIWEEKLY", label: "Every 2 weeks" },
     { value: "MONTHLY", label: "Monthly" },
 ]
+import { supabase } from "../../lib/supabase"
+import { LoadingSpinner } from "../../components/LoadingSpinner"
+import { InlineErrorMessage } from "../../components/InlineErrorMessage"
+import { LoadingOverlay } from "../../components/LoadingOverlay"
 
 export default function CreateServicePage() {
     const { hasRole, loading } = useUser()
@@ -35,6 +38,8 @@ export default function CreateServicePage() {
     const [thumbnailFile, setThumbnailFile] = useState<File | null>(null)
     const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null)
     const [isUploading, setIsUploading] = useState(false)
+    const [uploadError, setUploadError] = useState<string | null>(null)
+    const [streamError, setStreamError] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const [showWarningModal, setShowWarningModal] = useState(false)
@@ -73,28 +78,31 @@ export default function CreateServicePage() {
                 body: formData,
             })
 
-            if (!res.ok) {
-                const errorData = await res.json()
-                throw new Error(errorData.error || "Failed to upload thumbnail")
+            if (uploadError) {
+                throw new Error(uploadError.message || 'Failed to upload thumbnail')
             }
 
             const data = await res.json()
             return data.url
         } catch (error) {
-            console.error("Error uploading thumbnail:", error)
-            alert("Failed to upload thumbnail")
-            return null
+            const message = error instanceof Error ? error.message : 'Failed to upload thumbnail'
+            setUploadError(message)
+            throw error
         }
     }
 
-    const confirmStartStream = () => {
+    const handleStartStream = async () => {
+        // Reset errors
+        setUploadError(null)
+        setStreamError(null)
+
         if (!title) {
-            alert("Please enter a service title")
+            setStreamError("Please enter a service title")
             return
         }
 
         if (scheduleType === 'later' && !scheduledTime) {
-            alert("Please select a date and time for the scheduled stream")
+            setStreamError("Please select a date and time for the scheduled stream")
             return
         }
 
@@ -163,9 +171,12 @@ export default function CreateServicePage() {
                     router.push("/stream")
                 }
             } else {
-                alert(data.error || "Failed to create service")
+                const data = await res.json()
+                throw new Error(data.error || "Failed to start stream")
             }
         } catch (e) {
+            const message = e instanceof Error ? e.message : 'An unexpected error occurred'
+            setStreamError(message)
             console.error(e)
             alert("Error creating service")
         } finally {

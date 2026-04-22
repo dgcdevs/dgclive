@@ -9,6 +9,7 @@ import { banUser, reactivateUser, getUsers, getInvites, updateUserRole, syncYouT
 import { getLiveStream, getArchives, getDiscoveryFeed, getVideoById, getRecentStreams, getScheduledServices, getDashboardStats, deleteEvent, syncMuxAssets, trackContentView, getContentReactions, toggleContentReaction, getEventForEditing, updateEventContent, getDashboardHome } from './handlers/content';
 import { sendMessage, getMessages, getChatRoomSettings, updateChatRoomSettings, getChatRoomStats, flagChatMessage, moderateChatMessage, getChatModerationQueue, muteChatUser, unmuteChatUser } from './handlers/chat';
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './handlers/notifications';
+import { getBannedUsers, unbanUser, getChatViolations } from './handlers/moderation';
 
 const router = Router();
 
@@ -19,6 +20,10 @@ router.post("/login", login);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.get("/me", requireAuth, getMe);
+
+// Chat Authentication
+router.post("/chat/token", requireAuth, getChatToken);
+router.get("/chat/channels", requireAuth, getChatChannels);
 
 
 // ==========================================
@@ -43,6 +48,11 @@ router.patch('/chat/messages/:messageId/moderate', requireAuth, requireMediaOrAd
 router.post('/chat/mutes', requireAuth, requireMediaOrAdmin, muteChatUser);
 router.delete('/chat/mutes', requireAuth, requireMediaOrAdmin, unmuteChatUser);
 router.get('/chat/:eventId', requireAuth, getMessages);
+router.delete('/chat/:messageId/delete', requireAuth, requireMediaOrAdmin, deleteMessage);
+router.post('/chat/users/:userId/mute', requireAuth, requireMediaOrAdmin, muteUser);
+router.post('/chat/users/:userId/unmute', requireAuth, requireMediaOrAdmin, unmuteUser);
+router.post('/chat/users/:userId/ban', requireAuth, requireMediaOrAdmin, banUserFromChat);
+router.post('/chat/announcement', requireAuth, requireMediaOrAdmin, postAnnouncement);
 router.get('/archive', requireAuth, getArchives);
 router.get('/content/discover', requireAuth, getDiscoveryFeed);
 router.get('/dashboard/home', requireAuth, getDashboardHome);
@@ -56,6 +66,11 @@ router.patch('/content/events/:id', requireAuth, requireMediaOrAdmin, updateEven
 router.post('/content/events/:id/reaction', requireAuth, toggleContentReaction);
 router.delete('/content/events/:id', requireAuth, requireMediaOrAdmin, deleteEvent);
 router.post('/content/sync-mux', requireAuth, requireMediaOrAdmin, syncMuxAssets);
+
+// Moderation (Chat violations management)
+router.get('/moderation/violations', requireAuth, requireMediaOrAdmin, getChatViolations);
+router.get('/moderation/bans', requireAuth, requireMediaOrAdmin, getBannedUsers);
+router.post('/moderation/unban/:userId', requireAuth, requireMediaOrAdmin, unbanUser);
 
 // Notifications
 router.get('/notifications', requireAuth, getNotifications);
