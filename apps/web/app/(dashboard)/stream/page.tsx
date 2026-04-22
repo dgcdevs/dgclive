@@ -1026,9 +1026,9 @@ export default function ControlRoomPage() {
                     </div>
 
                     <div className="flex-1 overflow-hidden flex flex-col">
-                        {activeSidebarTab === 'chat' && (
+                        {activeSidebarTab === 'chat' && eventId && (
                             <div className="flex-1 flex flex-col min-h-0 bg-black/10">
-                                <LiveChat eventId={eventId || undefined} />
+                                <ChatContainer eventId={eventId} isLive={isLive} />
                             </div>
                         )}
 

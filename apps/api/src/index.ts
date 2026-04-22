@@ -164,6 +164,3 @@ httpServer.listen(port, () => {
 	console.log(`🚀 API running on http://localhost:${port}`);
 	console.log(`📡 Socket.io ready at http://localhost:${port}/socket.io/`);
 });
-
-// Export io for use in handlers
-export { io };
