@@ -44,7 +44,7 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
     channelId,
     maxResults: String(options.maxResults ?? 25),
     order: "date",
-    // Removed type filter to include both regular videos and broadcasts
+    type: "video",  // Only get videos, not channels or playlists
     key: apiKey
   });
 
@@ -73,9 +73,8 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
   }
 
   const detailParams = new URLSearchParams({
-    part: "snippet,contentDetails,statistics,liveStreamingDetails",
+    part: "snippet,contentDetails,statistics",
     id: videoIds.join(","),
-    eventType: "completed",  // Only fetch completed broadcasts (past live videos)
     key: apiKey
   });
 
@@ -88,30 +87,42 @@ export const fetchChannelVideos = async (options: FetchChannelVideosOptions = {}
   const detailData = await detailRes.json() as any;
   const detailItems = Array.isArray(detailData.items) ? detailData.items : [];
 
-  const videos = detailItems.map((item: any) => {
-    const snippet = item.snippet || {};
-    const contentDetails = item.contentDetails || {};
-    const statistics = item.statistics || {};
-    const thumbnails = snippet.thumbnails || {};
-    const thumbnailUrl =
-      thumbnails.maxres?.url ||
-      thumbnails.high?.url ||
-      thumbnails.medium?.url ||
-      thumbnails.default?.url ||
-      "";
+  const videos = detailItems
+    .map((item: any) => {
+      const snippet = item.snippet || {};
+      const contentDetails = item.contentDetails || {};
+      const statistics = item.statistics || {};
+      const thumbnails = snippet.thumbnails || {};
+      const thumbnailUrl =
+        thumbnails.maxres?.url ||
+        thumbnails.high?.url ||
+        thumbnails.medium?.url ||
+        thumbnails.default?.url ||
+        "";
 
-    return {
-      youtubeId: item.id,
-      title: snippet.title || "",
-      description: snippet.description || "",
-      thumbnailUrl,
-      durationSeconds: parseIsoDurationToSeconds(contentDetails.duration || ""),
-      publishedAt: snippet.publishedAt || new Date().toISOString(),
-      viewCount: Number(statistics.viewCount || 0),
-      channelId: snippet.channelId || channelId,
-      channelTitle: snippet.channelTitle || ""
-    } as YouTubeVideoItem;
-  });
+      const durationSeconds = parseIsoDurationToSeconds(contentDetails.duration || "");
+      
+      return {
+        youtubeId: item.id,
+        title: snippet.title || "",
+        description: snippet.description || "",
+        thumbnailUrl,
+        durationSeconds,
+        publishedAt: snippet.publishedAt || new Date().toISOString(),
+        viewCount: Number(statistics.viewCount || 0),
+        channelId: snippet.channelId || channelId,
+        channelTitle: snippet.channelTitle || ""
+      } as YouTubeVideoItem;
+    })
+    .filter((video: YouTubeVideoItem) => {
+      // Filter out shorts (videos under 60 seconds)
+      if (video.durationSeconds < 60) {
+        console.log(`[YouTube] Skipping short: "${video.title}" (${video.durationSeconds}s)`);
+        return false;
+      }
+      return true;
+    });
 
+  console.log(`[YouTube] Fetched ${videos.length} videos (${detailItems.length} total after filtering shorts)`);
   return { videos, nextPageToken: searchData.nextPageToken as string | undefined };
 };
