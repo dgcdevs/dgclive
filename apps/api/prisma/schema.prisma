@@ -82,7 +82,6 @@ model Profile {
   fullName  String
   role      Role     @default(MEMBER)
   isBanned  Boolean  @default(false) // Platform-wide ban
-  chatBanned Boolean? @default(false) // Chat-specific mute/ban (nullable for backwards compatibility)
   createdAt DateTime @default(now())
 
   // Relationships

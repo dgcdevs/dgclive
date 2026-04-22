@@ -19,13 +19,14 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
             return res.status(403).json({ error: "You are banned from the platform" });
         }
 
-        // Check if user is chat-banned
-        if (user?.chatBanned) {
-            return res.status(403).json({ error: "You are muted in chat" });
-        }
-
-        // Use eventId as roomKey (consistent with Stream Chat channel naming)
+        // Check if user is muted in this room (using ChatRoomMute)
         const roomKey = `event-${eventId}`;
+        const isMuted = await prisma.chatRoomMute.findFirst({
+            where: { profileId: userId, roomKey }
+        });
+        if (isMuted) {
+            return res.status(403).json({ error: "You are muted in this chat" });
+        }
 
         const message = await prisma.chatMessage.create({
             data: {
@@ -152,14 +153,19 @@ export const muteUser = async (req: AuthRequest, res: Response) => {
         }
 
         const moderator = await prisma.profile.findUnique({ where: { id: req.user.id } });
+        const roomKey = eventId ? `event-${eventId}` : 'global-chat';
 
-        // Mark as muted in database
-        await prisma.profile.update({
-            where: { id: userId },
-            data: { chatBanned: true }
+        // Create mute record using ChatRoomMute model
+        const muteRecord = await prisma.chatRoomMute.create({
+            data: {
+                profileId: userId,
+                mutedById: req.user.id,
+                roomKey,
+                expiresAt: duration ? new Date(Date.now() + duration * 1000) : null
+            }
         });
 
-        console.log(`[CHAT] User ${user.email} muted by ${moderator?.fullName || req.user.id}`);
+        console.log(`[CHAT] User ${user.email} muted by ${moderator?.fullName || req.user.id} in ${roomKey}`);
 
         // Emit Socket.io event to notify all moderators and the affected user
         if (eventId && typeof eventId === 'string') {
@@ -203,11 +209,11 @@ export const unmuteUser = async (req: AuthRequest, res: Response) => {
         }
 
         const moderator = await prisma.profile.findUnique({ where: { id: req.user.id } });
+        const roomKey = eventId ? `event-${eventId}` : 'global-chat';
 
-        // Remove mute
-        await prisma.profile.update({
-            where: { id: userId },
-            data: { chatBanned: false }
+        // Remove mute using ChatRoomMute model
+        await prisma.chatRoomMute.deleteMany({
+            where: { profileId: userId, roomKey }
         });
 
         console.log(`[CHAT] User ${user.email} unmuted by ${moderator?.fullName || req.user.id}`);
@@ -255,11 +261,17 @@ export const banUserFromChat = async (req: AuthRequest, res: Response) => {
         }
 
         const moderator = await prisma.profile.findUnique({ where: { id: req.user.id } });
+        const roomKey = eventId ? `event-${eventId}` : 'global-chat';
 
-        // Mark as chat-banned
-        await prisma.profile.update({
-            where: { id: userId },
-            data: { chatBanned: true }
+        // Ban user permanently using ChatRoomMute (no expiration)
+        await prisma.chatRoomMute.create({
+            data: {
+                profileId: userId,
+                mutedById: req.user.id,
+                roomKey,
+                reason: reason || 'User banned from chat',
+                expiresAt: null
+            }
         });
 
         console.log(`[CHAT] User ${user.email} banned from chat by ${moderator?.fullName || req.user.id}. Reason: ${reason || 'No reason provided'}`);

@@ -214,13 +214,25 @@ export const login = async (req: Request, res: Response) => {
       console.error("[Auth] Could not decode login token:", e);
     }
 
-    // 2. Fetch Profile from Prisma (to return role, etc.)
-    const profile = await prisma.profile.findUnique({
+    // 2. Fetch or Create Profile from Prisma
+    let profile = await prisma.profile.findUnique({
       where: { id: data.user.id },
     });
 
+    // If profile doesn't exist, create it (handles edge case of Supabase user without Profile record)
+    if (!profile) {
+      console.log(`[Auth] Creating missing profile for user ${data.user.id}`);
+      profile = await prisma.profile.create({
+        data: {
+          id: data.user.id,
+          email: data.user.email || "",
+          fullName: data.user.user_metadata?.full_name || "",
+        },
+      });
+    }
+
     // 3. Check if banned (redundancy, but good UX to tell them now)
-    if (profile?.isBanned) {
+    if (profile.isBanned) {
       res.status(403).json({ error: "Your account has been suspended." });
       return;
     }
