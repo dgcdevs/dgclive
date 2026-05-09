@@ -13,7 +13,6 @@ const RECURRENCE_OPTIONS = [
     { value: "BIWEEKLY", label: "Every 2 weeks" },
     { value: "MONTHLY", label: "Monthly" },
 ]
-import { supabase } from "../../lib/supabase"
 import { LoadingSpinner } from "../../components/LoadingSpinner"
 import { InlineErrorMessage } from "../../components/InlineErrorMessage"
 import { LoadingOverlay } from "../../components/LoadingOverlay"
@@ -66,7 +65,7 @@ export default function CreateServicePage() {
         if (fileInputRef.current) fileInputRef.current.value = ""
     }
 
-    const uploadThumbnail = async (): Promise<string | null> => {
+    const uploadThumbnail = async (token: string): Promise<string | null> => {
         if (!thumbnailFile) return null
 
         try {
@@ -75,14 +74,17 @@ export default function CreateServicePage() {
 
             const res = await fetch("/api/upload", {
                 method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
                 body: formData,
             })
 
+            const data = await res.json().catch(() => null)
             if (!res.ok) {
-                throw new Error('Failed to upload thumbnail')
+                throw new Error(data?.error || 'Failed to upload thumbnail')
             }
 
-            const data = await res.json()
             return data.url
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to upload thumbnail'
@@ -114,6 +116,9 @@ export default function CreateServicePage() {
         setIsSubmitting(true)
         try {
             const token = localStorage.getItem('token')
+            if (!token) {
+                throw new Error("Your session expired. Please sign in again.")
+            }
 
             // 0. Auto-provision the master Mux stream config (idempotent setup)
             try {
@@ -130,7 +135,7 @@ export default function CreateServicePage() {
             let uploadedThumbnailUrl = null
             if (thumbnailFile) {
                 setIsUploading(true)
-                uploadedThumbnailUrl = await uploadThumbnail()
+                uploadedThumbnailUrl = await uploadThumbnail(token)
                 setIsUploading(false)
 
                 if (!uploadedThumbnailUrl && thumbnailFile) {
@@ -160,7 +165,7 @@ export default function CreateServicePage() {
                 })
             })
 
-            const data = await res.json()
+            const data = await res.json().catch(() => null)
 
             if (res.ok) {
                 if (data.isScheduled) {
@@ -171,14 +176,13 @@ export default function CreateServicePage() {
                     router.push("/stream")
                 }
             } else {
-                const data = await res.json()
-                throw new Error(data.error || "Failed to start stream")
+                throw new Error(data?.error || "Failed to start stream")
             }
         } catch (e) {
             const message = e instanceof Error ? e.message : 'An unexpected error occurred'
             setStreamError(message)
             console.error(e)
-            alert("Error creating service")
+            alert(message)
         } finally {
             setIsSubmitting(false)
             setIsUploading(false)
@@ -202,7 +206,7 @@ export default function CreateServicePage() {
                         <h2 className="text-xl font-bold text-white mb-2">Have you started OBS?</h2>
                         <p className="text-white/60 mb-6 text-sm leading-relaxed">
                             For the best experience, please make sure you have actively started streaming from your encoder (OBS) before continuing.
-                            If you haven't, the stream might immediately disconnect or fail to show preview.
+                            If you have not, the stream might immediately disconnect or fail to show preview.
                         </p>
 
                         <div className="flex gap-3 mt-8">

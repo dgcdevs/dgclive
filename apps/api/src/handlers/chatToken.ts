@@ -1,7 +1,69 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/requireAuth";
 import { StreamChat } from "stream-chat";
+import type { ChannelData, NewMemberPayload, UserResponse } from "stream-chat";
 import { prisma } from "../lib/prisma";
+
+const STREAM_CHANNEL_TYPE = "messaging";
+type StreamChannelRole = "channel_member" | "channel_moderator";
+
+const toStreamChatRole = (role?: string | null) => {
+    if (role === "ADMIN") return "admin";
+    return "user";
+};
+
+const toStreamChannelRole = (role?: string | null): StreamChannelRole => {
+    if (role === "ADMIN" || role === "MEDIA") return "channel_moderator";
+    return "channel_member";
+};
+
+const getStringBodyValue = (value: unknown) => {
+    if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
+    return typeof value === "string" ? value : undefined;
+};
+
+const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error) return error.message;
+    if (!error || typeof error !== "object") return "";
+
+    const value = error as {
+        message?: unknown;
+        response?: { data?: { message?: unknown } };
+    };
+
+    return String(value.message || value.response?.data?.message || "");
+};
+
+const isAlreadyMemberError = (error: unknown) => {
+    const message = getErrorMessage(error).toLowerCase();
+    return message.includes("already") && message.includes("member");
+};
+
+const ensureEventChannelAccess = async (
+    client: StreamChat,
+    eventId: string,
+    userId: string,
+    userRole: string,
+) => {
+    const channelName = `event-${eventId}`;
+    const streamChannelRole = toStreamChannelRole(userRole);
+    const member: NewMemberPayload = { user_id: userId, channel_role: streamChannelRole };
+    const channelData: ChannelData = {
+        created_by_id: userId,
+        members: [member],
+    };
+    const channel = client.channel(STREAM_CHANNEL_TYPE, channelName, channelData);
+
+    await channel.create({ state: false, watch: false, presence: false });
+
+    try {
+        await channel.addMembers([member]);
+    } catch (error) {
+        if (!isAlreadyMemberError(error)) throw error;
+    }
+
+    return channelName;
+};
 
 /**
  * Generate a Stream Chat authentication token for the current user.
@@ -27,34 +89,56 @@ export const getChatToken = async (req: AuthRequest, res: Response) => {
         // Initialize Stream Chat admin client
         const client = StreamChat.getInstance(apiKey, apiSecret);
 
-        // Generate token for this user (24 hour expiration)
-        const token = client.createToken(req.user.id);
+        const eventId = getStringBodyValue(req.body?.eventId);
 
         // Fetch user's role from database
         const profile = await prisma.profile.findUnique({
             where: { id: req.user.id },
         });
 
-        const userRole = profile?.role || 'MEMBER';
+        const userRole = profile?.role || "MEMBER";
+        const streamRole = toStreamChatRole(userRole);
 
-        // Create/update user on Stream Chat side with role information
-        // This ensures Stream Chat knows the user's permissions
+        // Create/update user on Stream Chat. Stream's reserved `role` field
+        // must be a role configured in Stream Chat; keep app roles as metadata.
         try {
-            await client.upsertUser({
+            const streamUser: UserResponse & { appRole: string } = {
                 id: req.user.id,
                 name: req.user.fullName || req.user.email,
                 image: "", // Could add avatar URL later
-                role: userRole.toLowerCase(), // Stream Chat expects role to be set
-            } as any);
+                role: streamRole,
+                appRole: userRole,
+            };
+
+            await client.upsertUser(streamUser);
         } catch (error) {
             // Log but don't fail if upsert fails (user might already exist)
             console.warn("Failed to upsert Stream Chat user:", error);
         }
 
+        let channelName: string | undefined;
+        if (eventId) {
+            const event = await prisma.event.findUnique({
+                where: { id: eventId },
+                select: { id: true },
+            });
+
+            if (!event) {
+                return res.status(404).json({ error: "Event not found" });
+            }
+
+            channelName = await ensureEventChannelAccess(client, eventId, req.user.id, userRole);
+        }
+
+        // Generate token for this user after Stream has the current user/channel state.
+        const token = client.createToken(req.user.id);
+
         res.json({
             token,
             userId: req.user.id,
             apiKey,
+            channelType: STREAM_CHANNEL_TYPE,
+            channelName,
         });
     } catch (error) {
         console.error("Chat token error:", error);
@@ -93,7 +177,7 @@ export const getChatChannels = async (req: AuthRequest, res: Response) => {
         const channelName = `event-${eventId}`;
 
         // Query channel (doesn't create if not exists)
-        const channel = client.channel("messaging", channelName);
+        const channel = client.channel(STREAM_CHANNEL_TYPE, channelName);
 
         try {
             const state = await channel.query();
