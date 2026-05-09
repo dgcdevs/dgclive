@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { StreamChat, Channel } from 'stream-chat';
+import type { UserResponse } from 'stream-chat';
 import { useUser } from './use-user';
 import { useAuth } from './useAuth';
 import { io, Socket } from 'socket.io-client';
@@ -18,6 +19,13 @@ interface UseStreamChatReturn {
   joinChat: () => Promise<void>;
   leaveChat: () => void;
 }
+
+type ChatTokenResponse = {
+  token: string;
+  apiKey: string;
+  channelType?: string;
+  channelName?: string;
+};
 
 export function useStreamChat(eventId: string | null | undefined): UseStreamChatReturn {
   const { user } = useUser();
@@ -109,23 +117,31 @@ export function useStreamChat(eventId: string | null | undefined): UseStreamChat
             'Authorization': `Bearer ${authToken}`
           },
           credentials: 'include',
-          body: JSON.stringify({ userId: user.id }),
+          body: JSON.stringify({ userId: user.id, eventId }),
         });
 
         if (!tokenResponse.ok) {
           throw new Error('Failed to get Stream Chat token');
         }
 
-        const { token, apiKey } = await tokenResponse.json();
+        const {
+          token,
+          apiKey,
+          channelType = 'messaging',
+          channelName = `event-${eventId}`,
+        } = (await tokenResponse.json()) as ChatTokenResponse;
 
         // Create Stream Chat client
         const streamClient = new StreamChat(apiKey);
+        const avatar = typeof user.avatar === 'string' ? user.avatar : undefined;
+        const streamUser: UserResponse = {
+          id: user.id,
+          name: user.fullName || user.email || 'Anonymous',
+          image: avatar,
+        };
+
         await streamClient.connectUser(
-          {
-            id: user.id,
-            name: user.fullName || user.email || 'Anonymous',
-            image: user.avatar,
-          } as any,
+          streamUser,
           token
         );
 
@@ -133,9 +149,7 @@ export function useStreamChat(eventId: string | null | undefined): UseStreamChat
         setClient(streamClient);
 
         // Join event channel
-        const eventChannel = streamClient.channel('messaging', `event-${eventId}`, {
-          // Add any custom data here
-        } as any);
+        const eventChannel = streamClient.channel(channelType, channelName);
 
         await eventChannel.watch();
         channelRef.current = eventChannel;
@@ -143,9 +157,7 @@ export function useStreamChat(eventId: string | null | undefined): UseStreamChat
         setIsJoined(true);
 
         // Check if user is muted or banned
-        if (user.chatBanned) {
-          setIsBanned(true);
-        } else if (user.isBanned) {
+        if (user.chatBanned === true || user.isBanned === true) {
           setIsBanned(true);
         }
 
@@ -167,7 +179,7 @@ export function useStreamChat(eventId: string | null | undefined): UseStreamChat
         clientRef.current.disconnectUser().catch(console.error);
       }
     };
-  }, [user?.id, user?.chatBanned, user?.isBanned, eventId, authToken]);
+  }, [user?.id, user?.fullName, user?.email, user?.avatar, user?.chatBanned, user?.isBanned, eventId, authToken]);
 
   const joinChat = useCallback(async () => {
     if (channel) {

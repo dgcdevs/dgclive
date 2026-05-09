@@ -186,6 +186,7 @@ export function MediaDashboard() {
 
         const res = await fetch("/api/upload", {
             method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
             body: formData
         })
 
