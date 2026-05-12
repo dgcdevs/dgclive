@@ -11,12 +11,12 @@ export const deriveStreamLifecycle = (
   event: LifecycleShape,
   now: Date = new Date()
 ): StreamLifecycleStage => {
-  if (event.muxAssetId) {
-    return 'archived';
-  }
-
   if (event.isLive) {
     return 'live';
+  }
+
+  if (event.muxAssetId) {
+    return 'archived';
   }
 
   if (!event.muxStreamKey) {
