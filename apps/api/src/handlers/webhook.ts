@@ -62,6 +62,18 @@ const findOpenEvent = async (where: any) => {
     return chooseCurrentMuxEvent(events);
 };
 
+const getAssetPlaybackId = async (assetId?: string | null) => {
+    if (!assetId) return null;
+
+    try {
+        const asset = await mux.video.assets.retrieve(assetId);
+        return asset.playback_ids?.[0]?.id || null;
+    } catch (error) {
+        console.warn(`[MUX WEBHOOK] Failed to retrieve asset playback ID for ${assetId}:`, error);
+        return null;
+    }
+};
+
 const findTargetEventForWebhook = async (data: any) => {
     const liveStreamId = resolveLiveStreamId(data);
     const playbackId = resolvePlaybackId(data);
@@ -212,6 +224,9 @@ export const muxWebhookHandler = async (req: Request, res: Response) => {
                 where: { id: targetEvent.id },
                 data: {
                     isLive: false,
+                    ...(targetEvent.muxAssetId
+                        ? { muxPlaybackId: await getAssetPlaybackId(targetEvent.muxAssetId) || targetEvent.muxPlaybackId }
+                        : {}),
                     editorialStatus: targetEvent.muxAssetId ? 'ARCHIVED' : 'ENDED'
                 }
             });
@@ -267,12 +282,17 @@ export const muxWebhookHandler = async (req: Request, res: Response) => {
 
             await prisma.event.update({
                 where: { id: targetEvent.id },
-                data: {
-                    muxAssetId: assetId,
-                    isLive: false,
-                    muxPlaybackId: playbackId || targetEvent.muxPlaybackId,
-                    editorialStatus: targetEvent.isPublished ? 'ARCHIVED' : 'DRAFT'
-                }
+                data: targetEvent.isLive
+                    ? {
+                        muxAssetId: assetId,
+                        editorialStatus: 'LIVE'
+                    }
+                    : {
+                        muxAssetId: assetId,
+                        isLive: false,
+                        muxPlaybackId: playbackId || targetEvent.muxPlaybackId,
+                        editorialStatus: targetEvent.isPublished ? 'ARCHIVED' : 'DRAFT'
+                    }
             });
 
             io.emit('recent-streams-updated', { count: 1 });
