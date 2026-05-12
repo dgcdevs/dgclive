@@ -326,6 +326,7 @@ export const setupMasterStream = async (req: Request, res: Response) => {
                     isPublic: true,
                     isLive: true,
                     muxPlaybackId: playbackId,
+                    muxLiveStreamId: liveStream.id,
                     muxStreamKey: streamKey,
                 }
             });

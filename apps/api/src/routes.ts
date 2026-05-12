@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { register, login, verifyEmail } from './handlers/auth';
 import { forgotPassword, resetPassword } from './handlers/forgotPassword';
 import { getMe } from './handlers/me';
-import { startStream, stopStream, getStreamConfig, publishStream, unpublishStream, checkStreamStatus, debugStreamStatus, rescheduleStream, sendUpcomingReminder, getBroadcastAuditLog, getPublishReadiness } from './handlers/stream';
+import { startStream, stopStream, getStreamConfig, publishStream, unpublishStream, checkStreamStatus, debugStreamStatus, rescheduleStream, sendUpcomingReminder, getBroadcastAuditLog, getPublishReadiness, streamHeartbeat, getStreamStats, updateStreamSettings } from './handlers/stream';
 import { createInvite } from './handlers/invite';
 import { requireAuth, requireAdmin, requireMediaOrAdmin } from './middleware/requireAuth';
 import { banUser, reactivateUser, getUsers, getInvites, updateUserRole, syncYouTubeVideos, setupMasterStream } from './handlers/admin';
@@ -11,6 +11,7 @@ import { sendMessage, getMessages, deleteMessage, muteUser, unmuteUser, banUserF
 import { getChatToken, getChatChannels } from './handlers/chatToken';
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from './handlers/notifications';
 import { getBannedUsers, unbanUser, getChatViolations } from './handlers/moderation';
+import { muxWebhookHandler } from './handlers/webhook';
 
 const router = Router();
 
@@ -26,6 +27,9 @@ router.get("/me", requireAuth, getMe);
 router.post("/chat/token", requireAuth, getChatToken);
 router.get("/chat/channels", requireAuth, getChatChannels);
 
+// Mux webhooks must remain public; authenticity is verified by MUX_WEBHOOK_SECRET when configured.
+router.post('/webhooks/mux', muxWebhookHandler);
+router.post('/api/webhooks/mux', muxWebhookHandler);
 
 // ==========================================
 // PHASE 3: THE SANCTUARY (Members Area)
@@ -36,6 +40,8 @@ router.get('/stream/status', requireAuth, checkStreamStatus);
 router.get('/stream/debug', requireAuth, requireMediaOrAdmin, debugStreamStatus);
 router.get('/stream/audit-log', requireAuth, requireMediaOrAdmin, getBroadcastAuditLog);
 router.get('/stream/:id/publish-readiness', requireAuth, requireMediaOrAdmin, getPublishReadiness);
+router.get('/stream/:id/stats', requireAuth, requireMediaOrAdmin, getStreamStats);
+router.patch('/stream/:id/settings', requireAuth, requireMediaOrAdmin, updateStreamSettings);
 router.get('/stream/:id', requireAuth, getVideoById);
 router.post('/chat', requireAuth, sendMessage);
 router.get('/chat/:eventId', requireAuth, getMessages);
@@ -81,6 +87,7 @@ router.post('/stream/publish', requireAuth, requireMediaOrAdmin, publishStream);
 router.post('/stream/unpublish', requireAuth, requireMediaOrAdmin, unpublishStream);
 router.post('/stream/reschedule', requireAuth, requireMediaOrAdmin, rescheduleStream);
 router.post('/stream/remind', requireAuth, requireMediaOrAdmin, sendUpcomingReminder);
+router.post('/stream/heartbeat', requireAuth, requireMediaOrAdmin, streamHeartbeat);
 router.post('/admin/setup-master-stream', requireAuth, requireMediaOrAdmin, setupMasterStream);
 router.post('/users/:userId/ban', requireAuth, requireAdmin, banUser);
 router.post('/users/:userId/reactivate', requireAuth, requireAdmin, reactivateUser);

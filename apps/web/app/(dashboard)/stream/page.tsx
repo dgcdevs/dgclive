@@ -10,6 +10,7 @@ import { LoadingSpinner } from "../../components/LoadingSpinner"
 import { InlineErrorMessage } from "../../components/InlineErrorMessage"
 import { io, Socket } from "socket.io-client"
 import MuxPlayer from "@mux/mux-player-react";
+import { API_BASE_URL, apiUrl, readJsonResponse } from "../../../lib/api"
 
 function StudioTimer({ streamStartedAt, isLive }: { streamStartedAt: string | null, isLive: boolean }) {
     const [uptime, setUptime] = useState("00:00:00");
@@ -112,6 +113,7 @@ export default function ControlRoomPage() {
     const lastLiveStatusFetchRef = useRef<number>(0)
     const lastConfigFetchRef = useRef<number>(0)
     const encoderStatusIntervalRef = useRef<NodeJS.Timeout | null>(null)
+    const lastLiveSignalAtRef = useRef<number>(0)
 
     // ---------------------------------------------------------------
     // Helper: Check if encoder is actually connected to Mux
@@ -122,7 +124,7 @@ export default function ControlRoomPage() {
         setCheckingEncoderStatus(true);
         const token = localStorage.getItem('token');
         
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/status?eventId=${eventId}`, {
+        fetch(apiUrl(`/stream/status?eventId=${eventId}`), {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())
@@ -156,11 +158,28 @@ export default function ControlRoomPage() {
         socket.emit("join-room", eid);
     };
 
+    const applyLiveSignalPayload = (payload: any) => {
+        if (!payload) return;
+
+        lastLiveSignalAtRef.current = Date.now();
+        if (payload.eventId) setEventId(payload.eventId);
+        if (payload.playbackId) setPlaybackId(payload.playbackId);
+        if (payload.isPublished !== undefined) setIsPublished(payload.isPublished);
+        if (payload.streamStartedAt) setStreamStartedAt(payload.streamStartedAt);
+
+        setIsLive(true);
+        setEncoderConnected(true);
+        setLifecycleStage('live');
+        setObsStatus('live');
+        setStreamError(null);
+        setEncoderError(null);
+    };
+
     const handleGenerateMasterKey = async () => {
         setIsGeneratingKey(true)
         try {
             const token = localStorage.getItem('token')
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/setup-master-stream`, {
+            const res = await fetch(apiUrl("/admin/setup-master-stream"), {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -196,7 +215,7 @@ export default function ControlRoomPage() {
     }
 
     // 2. Fetcher for live stream status
-    const loadLiveStatus = useRef(() => {
+    const loadLiveStatus = useRef((force = false) => {
         // Prevent concurrent requests - skip if already fetching
         if (isFetchingLiveStatusRef.current) {
             console.log('[Live Status] Already fetching, skipping...')
@@ -205,7 +224,7 @@ export default function ControlRoomPage() {
 
         // Rate limit: don't fetch more than once per 2 seconds
         const now = Date.now()
-        if (now - lastLiveStatusFetchRef.current < 2000) {
+        if (!force && now - lastLiveStatusFetchRef.current < 2000) {
             console.log('[Live Status] Rate limited, skipping...')
             return
         }
@@ -216,13 +235,41 @@ export default function ControlRoomPage() {
         const token = localStorage.getItem('token')
         const headers = { 'Authorization': `Bearer ${token}` }
         
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
+        fetch(apiUrl("/stream/live"), { headers })
             .then(async res => {
-                const data = await res.json();
+                const data = await readJsonResponse<{
+                    code?: string
+                    error?: string
+                    message?: string
+                    [key: string]: any
+                }>(res);
+                const message = data?.message || data?.error
+
+                if (res.status === 401 || res.status === 403) {
+                    setStreamError({
+                        message: message || "Your session is not authorized for the control room. Please sign in again.",
+                        code: "AUTH_ERROR"
+                    });
+                    return null;
+                }
+
+                if (res.status === 503 && data?.code === 'AUTH_PROVIDER_UNAVAILABLE') {
+                    setStreamError({
+                        message: message || "Session verification is temporarily unavailable. Please refresh in a moment.",
+                        code: "AUTH_PROVIDER_UNAVAILABLE"
+                    });
+                    return null;
+                }
+
                 if (!res.ok) {
                     // Capture specific error codes for diagnostics
-                    if (data.code && data.code !== 'NO_LIVE_STREAM') {
-                        setStreamError({ message: data.message, code: data.code });
+                    if (data?.code && data.code !== 'NO_LIVE_STREAM') {
+                        setStreamError({ message: message || "The stream status request failed.", code: data.code });
+                    } else if (res.status >= 500) {
+                        setStreamError({
+                            message: message || `The backend returned HTTP ${res.status} while loading stream status.`,
+                            code: `HTTP_${res.status}`
+                        });
                     }
                     return null;
                 }
@@ -231,6 +278,10 @@ export default function ControlRoomPage() {
             })
             .then(data => {
                 if (!data) {
+                    if (Date.now() - lastLiveSignalAtRef.current < 60_000) {
+                        return;
+                    }
+
                     setEventId(null);
                     setPlaybackId(null);
                     setEventStreamKey(null);
@@ -241,11 +292,14 @@ export default function ControlRoomPage() {
                     return;
                 }
                 if (data.id) {
+                    const hasRecentLiveSignal = Date.now() - lastLiveSignalAtRef.current < 60_000;
+                    const nextIsLive = Boolean(data.isLive || data.encoderConnected || data.lifecycleStage === 'live' || hasRecentLiveSignal);
+
                     setEventId(data.id);
-                    setIsLive(data.isLive ?? false);
+                    setIsLive(nextIsLive);
                     setIsPublished(data.isPublished ?? false);
-                    setLifecycleStage(data.lifecycleStage ?? 'idle');
-                    setObsStatus(data.encoderConnected ? 'live' : data.lifecycleStage === 'ready' ? 'connecting' : 'offline');
+                    setLifecycleStage(nextIsLive ? 'live' : data.lifecycleStage ?? 'idle');
+                    setObsStatus(nextIsLive ? 'live' : data.lifecycleStage === 'ready' ? 'connecting' : 'offline');
                 }
                 if (data.playbackId) setPlaybackId(data.playbackId);
                 if (data.muxStreamKey) {
@@ -260,7 +314,7 @@ export default function ControlRoomPage() {
             })
             .catch(err => {
                 console.error('[Live Status] Error:', err);
-                setStreamError({ message: "Failed to connect to the server. Please check your internet.", code: "FETCH_ERROR" });
+                setStreamError({ message: `Could not reach the backend at ${API_BASE_URL}. Make sure the API server is running.`, code: "FETCH_ERROR" });
             })
             .finally(() => {
                 isFetchingLiveStatusRef.current = false
@@ -279,7 +333,7 @@ export default function ControlRoomPage() {
         const headers = { 'Authorization': `Bearer ${token}` }
 
         // Fetch current stream's muxStreamKey immediately on mount
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/live`, { headers })
+        fetch(apiUrl("/stream/live"), { headers })
             .then(res => {
                 if (!res.ok) return null
                 return res.json()
@@ -300,7 +354,7 @@ export default function ControlRoomPage() {
             isFetchingConfigRef.current = true
             lastConfigFetchRef.current = Date.now()
             
-            fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/config`, { headers })
+            fetch(apiUrl("/stream/config"), { headers })
                 .then(res => {
                     if (res.status === 404) {
                         setNeedsConfig(true)
@@ -339,7 +393,7 @@ export default function ControlRoomPage() {
 
         // 3. Set up Socket.io
         if (!socketRef.current) {
-            const socket = io(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001");
+            const socket = io(API_BASE_URL);
             socketRef.current = socket;
 
             socket.on("connect", () => setSocketConnected(true));
@@ -356,7 +410,14 @@ export default function ControlRoomPage() {
             socket.on("stream-went-live", (payload: any) => {
                 console.log("[Socket] stream-went-live:", payload);
                 // Silence refresh the whole state to ensure everything (timers, IDs) is correct
-                loadLiveStatus.current();
+                applyLiveSignalPayload(payload);
+                loadLiveStatus.current(true);
+            });
+
+            socket.on("STREAM_ACTIVE", (payload: any) => {
+                console.log("[Socket] STREAM_ACTIVE:", payload);
+                applyLiveSignalPayload(payload);
+                loadLiveStatus.current(true);
             });
 
             // OBS disconnected → webhook ended the event
@@ -375,6 +436,11 @@ export default function ControlRoomPage() {
                 // Modifying it causes React to remount the MuxPlayer wrapper.
                 if (payload.isPublished !== undefined) setIsPublished(payload.isPublished);
                 if (payload.lifecycleStage) setLifecycleStage(payload.lifecycleStage);
+                if (payload.isLive === true || payload.lifecycleStage === 'live') {
+                    setIsLive(true);
+                    setEncoderConnected(true);
+                    setObsStatus('live');
+                }
             });
 
             socket.on("stream-preview-ready", () => { setIsPublished(false); });
@@ -392,8 +458,11 @@ export default function ControlRoomPage() {
 
                 if (payload.type === 'STREAM_WARNING' || payload.type === 'STREAM_DISCONNECTED') setObsStatus('connecting');
                 if (payload.type === 'STREAM_ACTIVE') {
+                    setIsLive(true);
+                    setEncoderConnected(true);
+                    setLifecycleStage('live');
                     setObsStatus('live');
-                    loadLiveStatus.current(); // Refresh on active signal too
+                    loadLiveStatus.current(true); // Refresh on active signal too
                 }
             });
 
@@ -434,7 +503,7 @@ export default function ControlRoomPage() {
         const fetchStats = async () => {
             try {
                 const token = localStorage.getItem('token');
-                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/${eventId}/stats`, {
+                const res = await fetch(apiUrl(`/stream/${eventId}/stats`), {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (res.ok) {
@@ -499,7 +568,10 @@ export default function ControlRoomPage() {
         if (streamError && (
             streamError.code === 'MUX_STREAM_NOT_FOUND' ||
             streamError.code === 'MUX_ACTIVE_NO_EVENT' ||
-            streamError.code === 'FETCH_ERROR'
+            streamError.code === 'FETCH_ERROR' ||
+            streamError.code === 'AUTH_ERROR' ||
+            streamError.code === 'AUTH_PROVIDER_UNAVAILABLE' ||
+            streamError.code.startsWith('HTTP_')
         )) {
             setShowDiagnosticModal(true);
         }
@@ -522,7 +594,7 @@ export default function ControlRoomPage() {
         const sendHeartbeat = async () => {
             try {
                 const token = localStorage.getItem('token');
-                await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/heartbeat`, {
+                await fetch(apiUrl("/stream/heartbeat"), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ eventId })
@@ -548,7 +620,7 @@ export default function ControlRoomPage() {
 
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/${eventId}/settings`, {
+            const res = await fetch(apiUrl(`/stream/${eventId}/settings`), {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify(setting)
@@ -576,7 +648,7 @@ export default function ControlRoomPage() {
             }
             setObsStatus('offline') // Resume polling
             const token = localStorage.getItem('token')
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/stop`, {
+            const res = await fetch(apiUrl("/stream/stop"), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ eventId })
@@ -604,7 +676,7 @@ export default function ControlRoomPage() {
         try {
             setIsLoadingConfig(true)
             const token = localStorage.getItem('token')
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/start`, {
+            const res = await fetch(apiUrl("/stream/start"), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ title: 'Live Stream', description: '', isPublic: false })
@@ -645,7 +717,7 @@ export default function ControlRoomPage() {
         setIsLoadingPublishReadiness(true)
         try {
             const token = localStorage.getItem('token')
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/${eventId}/publish-readiness`, {
+            const res = await fetch(apiUrl(`/stream/${eventId}/publish-readiness`), {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
             if (res.ok) {
@@ -671,7 +743,7 @@ export default function ControlRoomPage() {
         setIsPublishing(true)
         try {
             const token = localStorage.getItem('token')
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/publish`, {
+            const res = await fetch(apiUrl("/stream/publish"), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({
@@ -704,7 +776,7 @@ export default function ControlRoomPage() {
         setIsSubmittingUnpublish(true)
         try {
             const token = localStorage.getItem('token')
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stream/unpublish`, {
+            const res = await fetch(apiUrl("/stream/unpublish"), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ eventId })
@@ -734,7 +806,8 @@ export default function ControlRoomPage() {
 
     // Only use actual event playbackId — NEVER use masterPlaybackId for playback
     // Master stream is for OBS ingest only, not for display
-    const activePlaybackId = playbackId || null;
+    const activePlaybackId = playbackId || undefined;
+    const hasPlayableLiveSignal = Boolean(activePlaybackId && (isLive || encoderConnected || obsStatus === 'live' || lifecycleStage === 'live'));
     const publishHasBlockers = publishChecks.some((check) => check.required && check.status === 'fail')
     const allChecksAcknowledged = publishChecks.length > 0 && publishChecks.every((check) => publishAcknowledgements.includes(check.id))
     const sessionBadge = lifecycleStage === 'live'
@@ -848,7 +921,7 @@ export default function ControlRoomPage() {
 
                             {/* ── LAYER 1: Waiting Slate (absolute, behind player) ── */}
                             <div className={`absolute inset-0 bg-zinc-900 flex flex-col items-center justify-center gap-4 text-center px-8 transition-opacity duration-500
-                                ${(isLive && obsStatus === 'live' && activePlaybackId) ? 'opacity-0 pointer-events-none' : 'opacity-100'}
+                                ${hasPlayableLiveSignal ? 'opacity-0 pointer-events-none' : 'opacity-100'}
                             `}>
                                 <div className="p-5 rounded-full bg-zinc-800 border border-white/10">
                                     <Video className="h-10 w-10 text-white/30" />
@@ -887,14 +960,14 @@ export default function ControlRoomPage() {
 
                             {/* ── LAYER 2: MuxPlayer — mounted ONLY when signal is live to prevent caching ── */}
                             {/* Key is ONLY the playbackId, but mounting depends on current signal status */}
-                            {activePlaybackId && isLive && obsStatus === 'live' && (
+                            {hasPlayableLiveSignal && (
                                 <div
                                     key={activePlaybackId}
                                     className="absolute inset-0"
                                 >
                                     <MuxPlayer
                                         playbackId={activePlaybackId}
-                                        streamType="ll-live"
+                                        streamType="live"
                                         autoPlay="muted"
                                         muted={true}
                                         poster=""
@@ -910,7 +983,7 @@ export default function ControlRoomPage() {
 
                             {/* ── LAYER 3: Status badge (top-left) — CSS only, never unmounts ── */}
                             <div className="absolute top-3 left-3 z-20 pointer-events-none">
-                                {isLive && obsStatus === 'live' && (
+                                {hasPlayableLiveSignal && (
                                     !isPublished ? (
                                         <div className="flex items-center gap-2 bg-yellow-500/20 border border-yellow-400/40 backdrop-blur-sm px-3 py-1.5 rounded-lg">
                                             <span className="h-2 w-2 rounded-full bg-yellow-400 animate-pulse" />
@@ -926,7 +999,7 @@ export default function ControlRoomPage() {
                             </div>
 
                             {/* ── LAYER 4: Go Live button (bottom-center) ── */}
-                            {isLive && obsStatus === 'live' && !isPublished && (
+                            {hasPlayableLiveSignal && !isPublished && (
                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
                                     {!isPublished ? (
                                         <button
@@ -1344,7 +1417,16 @@ export default function ControlRoomPage() {
                                                 <li>Check your internet connection.</li>
                                             )}
                                             {streamError.code === 'FETCH_ERROR' && (
-                                                <li>The backend server is currently unreachable.</li>
+                                                <li>Start the API server on port 3001, then refresh this page.</li>
+                                            )}
+                                            {streamError.code === 'AUTH_ERROR' && (
+                                                <li>Your browser session is stale. Sign out, sign back in, then reopen the control room.</li>
+                                            )}
+                                            {streamError.code === 'AUTH_PROVIDER_UNAVAILABLE' && (
+                                                <li>Session verification is temporarily unavailable. Keep the stream running and refresh in a moment.</li>
+                                            )}
+                                            {streamError.code.startsWith('HTTP_') && (
+                                                <li>The backend answered but returned an error. Check the API terminal for the matching request log.</li>
                                             )}
                                         </ul>
                                     </div>

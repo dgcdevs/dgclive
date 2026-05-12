@@ -483,7 +483,7 @@ const getCurrentControlRoomEvent = async () => {
       muxStreamKey: { not: null },
       startTime: { lte: now }
     },
-    orderBy: { startTime: 'asc' },
+    orderBy: { startTime: 'desc' },
     select: eventSelect
   });
   if (readyEvent) return readyEvent;
@@ -525,6 +525,76 @@ const getPublicLiveEvent = async () => {
     orderBy: { startTime: 'desc' },
     select: eventSelect
   });
+};
+
+const getMuxLiveStreamForControlEvent = async (event: any) => {
+  if (event.muxLiveStreamId) {
+    try {
+      return await mux.video.liveStreams.retrieve(event.muxLiveStreamId);
+    } catch (error) {
+      console.warn(`[Control Room] Failed to retrieve Mux stream ${event.muxLiveStreamId}; falling back to stream key lookup`, error);
+    }
+  }
+
+  if (!event.muxStreamKey) return null;
+
+  const liveStreams = await mux.video.liveStreams.list({
+    limit: 1,
+    stream_key: event.muxStreamKey
+  });
+
+  return liveStreams.data?.[0] ?? null;
+};
+
+const syncControlRoomEventWithMux = async (event: any) => {
+  if (!event?.muxStreamKey && !event?.muxLiveStreamId) return event;
+
+  try {
+    const muxLiveStream = await getMuxLiveStreamForControlEvent(event);
+    if (muxLiveStream?.status !== 'active') return event;
+
+    const playbackId = muxLiveStream.playback_ids?.[0]?.id || event.muxPlaybackId;
+    const shouldUpdate =
+      !event.isLive ||
+      event.editorialStatus !== 'LIVE' ||
+      event.muxLiveStreamId !== muxLiveStream.id ||
+      (playbackId && event.muxPlaybackId !== playbackId);
+
+    if (!shouldUpdate) return event;
+
+    const updatedEvent = await prisma.event.update({
+      where: { id: event.id },
+      data: {
+        isLive: true,
+        editorialStatus: 'LIVE',
+        ...(playbackId ? { muxPlaybackId: playbackId } : {}),
+        ...(muxLiveStream.id ? { muxLiveStreamId: muxLiveStream.id } : {})
+      }
+    });
+
+    const streamPayload = {
+      eventId: updatedEvent.id,
+      playbackId: updatedEvent.muxPlaybackId,
+      isLive: true,
+      isPublished: updatedEvent.isPublished,
+      title: updatedEvent.title,
+      startTime: updatedEvent.startTime,
+      streamStartedAt: updatedEvent.startTime
+    };
+
+    io.to('control-room').emit('STREAM_ACTIVE', streamPayload);
+    io.to('control-room').emit('stream-went-live', streamPayload);
+    io.to(updatedEvent.id).emit('stream-status-changed', {
+      isLive: true,
+      isPublished: updatedEvent.isPublished,
+      lifecycleStage: 'live'
+    });
+
+    return updatedEvent;
+  } catch (error) {
+    console.error('[Control Room] Failed to sync Mux live status:', error);
+    return event;
+  }
 };
 
 const mapLiveStreamResponse = (targetEvent: any, isAdminOrMedia: boolean) => {
@@ -619,17 +689,21 @@ export const getLiveStream = async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    if (!isAdminOrMedia && (!targetEvent.isLive || targetEvent.isPublished === false)) {
+    const syncedTargetEvent = isAdminOrMedia
+      ? await syncControlRoomEventWithMux(targetEvent)
+      : targetEvent;
+
+    if (!isAdminOrMedia && (!syncedTargetEvent.isLive || syncedTargetEvent.isPublished === false)) {
       res.status(404).json({ message: 'No live stream active' });
       return;
     }
 
     const roomSettings = await prisma.chatRoomSettings.findUnique({
-      where: { roomKey: `event:${targetEvent.id}` }
+      where: { roomKey: `event:${syncedTargetEvent.id}` }
     });
 
     res.json({
-      ...mapLiveStreamResponse(targetEvent, isAdminOrMedia),
+      ...mapLiveStreamResponse(syncedTargetEvent, isAdminOrMedia),
       chatEnabled: roomSettings?.chatEnabled ?? true,
       slowMode: (roomSettings?.slowModeSeconds ?? 0) > 0,
       slowModeSeconds: roomSettings?.slowModeSeconds ?? 0

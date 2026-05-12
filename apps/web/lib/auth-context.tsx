@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { apiUrl, readJsonResponse } from "./api"
 
 export type Role = "MEMBER" | "MEDIA" | "ADMIN"
 
@@ -67,19 +68,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/me`, {
+            const res = await fetch(apiUrl("/me"), {
+                cache: "no-store",
                 headers: {
                     Authorization: `Bearer ${nextToken}`
                 }
             })
 
             if (!res.ok) {
+                const data = await readJsonResponse<{ code?: string; message?: string; error?: string }>(res)
+                if (res.status === 503 && data?.code === "AUTH_PROVIDER_UNAVAILABLE") {
+                    console.warn("[Auth] Session verification temporarily unavailable; keeping local session")
+                    return
+                }
+
                 console.error(`[Auth] /me endpoint failed with status ${res.status}`)
                 if (res.status === 401 || res.status === 403) {
                     // Token is invalid or expired - clear it
                     signOut()
                 }
-                throw new Error("Session invalid")
+                throw new Error(data?.message || data?.error || "Session invalid")
             }
 
             const data = await res.json()

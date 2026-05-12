@@ -14,6 +14,7 @@ const EVENT_BASE_COLUMNS = [
   'isLive',
   'thumbnailUrl',
   'muxPlaybackId',
+  'muxLiveStreamId',
   'muxAssetId',
   'muxStreamKey',
   'createdAt',
