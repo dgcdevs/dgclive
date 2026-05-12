@@ -132,9 +132,10 @@ model Event {
   countdownOffsetMinutes Int                  @default(30)
 
   // --- MUX VIDEO DATA (Critical Addition) ---
-  muxPlaybackId String? // For the Frontend Player
-  muxStreamKey  String? // For OBS (Hidden)
-  muxAssetId    String? // For On-Demand Replay
+  muxPlaybackId    String? // For the Frontend Player
+  muxStreamKey     String? // For OBS (Hidden)
+  muxLiveStreamId  String? // Mux Live Stream ID for webhook/status mapping
+  muxAssetId       String? // For On-Demand Replay
 
   thumbnailUrl  String? // <--- Uploaded by User
 

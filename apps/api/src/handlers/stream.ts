@@ -10,10 +10,36 @@ import { getRecentBroadcastAuditLogs, recordBroadcastAuditLog } from '../lib/bro
 const RECURRENCE_RULES = ['NONE', 'DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'] as const;
 const DEFAULT_STREAM_TITLE = 'Live Stream';
 
+type MuxLookupEvent = {
+    muxLiveStreamId?: string | null;
+    muxStreamKey?: string | null;
+};
+
 const parseOptionalString = (value: unknown) => {
     if (typeof value !== 'string') return null;
     const trimmed = value.trim();
     return trimmed ? trimmed : null;
+};
+
+const getMuxLiveStreamForEvent = async (event: MuxLookupEvent) => {
+    if (event.muxLiveStreamId) {
+        try {
+            return await mux.video.liveStreams.retrieve(event.muxLiveStreamId);
+        } catch (error) {
+            console.warn(`[Mux Status] Failed to retrieve live stream ${event.muxLiveStreamId}; falling back to stream key lookup`, error);
+        }
+    }
+
+    if (!event.muxStreamKey) {
+        return null;
+    }
+
+    const liveStreams = await mux.video.liveStreams.list({
+        limit: 1,
+        stream_key: event.muxStreamKey
+    });
+
+    return liveStreams.data?.[0] ?? null;
 };
 
 const normalizeCountdownOffset = (value: unknown) => {
@@ -41,17 +67,13 @@ type PublishReadinessCheck = {
     details: string;
 };
 
-const getEncoderConnectionForEvent = async (event: { muxStreamKey?: string | null }) => {
-    if (!event.muxStreamKey) {
+const getEncoderConnectionForEvent = async (event: MuxLookupEvent) => {
+    if (!event.muxLiveStreamId && !event.muxStreamKey) {
         return false;
     }
 
     try {
-        const liveStreams = await mux.video.liveStreams.list({ limit: 100 });
-        const matchingStream = liveStreams.data?.find((stream: any) => {
-            const streamKey = stream.stream_keys?.[0]?.key || stream.stream_key;
-            return streamKey === event.muxStreamKey;
-        });
+        const matchingStream = await getMuxLiveStreamForEvent(event);
 
         return matchingStream?.status === 'active';
     } catch (error) {
@@ -69,16 +91,19 @@ const evaluatePublishReadiness = async (event: any): Promise<{
 }> => {
     const lifecycleStage = deriveStreamLifecycle(event);
     const encoderConnected = await getEncoderConnectionForEvent(event);
+    const effectiveLifecycleStage = encoderConnected && lifecycleStage !== 'archived' && lifecycleStage !== 'ended'
+        ? 'live'
+        : lifecycleStage;
 
     const checks: PublishReadinessCheck[] = [
         {
             id: 'session-active',
             label: 'Session is in a publishable stage',
-            status: lifecycleStage === 'scheduled' || lifecycleStage === 'ready' || lifecycleStage === 'live' ? 'pass' : 'fail',
+            status: effectiveLifecycleStage === 'scheduled' || effectiveLifecycleStage === 'ready' || effectiveLifecycleStage === 'live' ? 'pass' : 'fail',
             required: true,
-            details: lifecycleStage === 'ended' || lifecycleStage === 'archived'
+            details: effectiveLifecycleStage === 'ended' || effectiveLifecycleStage === 'archived'
                 ? 'Ended or archived sessions can no longer be published.'
-                : `Current session stage: ${lifecycleStage}.`
+                : `Current session stage: ${effectiveLifecycleStage}.`
         },
         {
             id: 'encoder-connected',
@@ -131,7 +156,7 @@ const evaluatePublishReadiness = async (event: any): Promise<{
     const warnings = checks.filter((check) => check.status === 'warn');
 
     return {
-        lifecycleStage,
+        lifecycleStage: effectiveLifecycleStage,
         canPublish: blockers.length === 0,
         checks,
         blockers,
@@ -213,15 +238,98 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             ?? (normalizedRecurrenceRule !== 'NONE' ? `series-${Date.now()}` : null);
         const editorialStatus = resolveEditorialStatus(scheduledDate, isScheduled);
 
-        // 1.5. CHECK FOR EXISTING INACTIVE EVENT (Reuse stream key if stopped)
-        // This allows media to stop/start without reconfiguring OBS
+        let masterStream = await prisma.event.findFirst({
+            where: { title: "MASTER_STREAM" }
+        });
+
+        if (!masterStream?.muxStreamKey || !masterStream?.muxPlaybackId) {
+            let liveStream: any;
+
+            try {
+                liveStream = await mux.video.liveStreams.create({
+                    playback_policy: ['public'],
+                    new_asset_settings: { playback_policy: ['public'] },
+                    reconnect_window: 60,
+                    passthrough: 'MASTER_STREAM',
+                });
+            } catch (e: any) {
+                console.error("Mux Error:", e);
+                if (e?.body?.error?.type === 'invalid_parameters' || e?.message?.includes('free plan')) {
+                    console.log("Using Mock Master Stream for Dev (Mux Free Plan Limit Reached)");
+                    liveStream = {
+                        playback_ids: [{ id: "mock-master-playback-id" }],
+                        stream_keys: [{ key: "mock-master-stream-key-for-dev" }],
+                        id: "mock-master-stream-id"
+                    };
+                } else {
+                    throw e;
+                }
+            }
+
+            const newMasterStreamKey = liveStream.stream_keys?.[0]?.key || liveStream.stream_key;
+            const newMasterPlaybackId = liveStream.playback_ids?.[0]?.id;
+
+            masterStream = masterStream
+                ? await prisma.event.update({
+                    where: { id: masterStream.id },
+                    data: {
+                        muxPlaybackId: newMasterPlaybackId,
+                        muxLiveStreamId: liveStream.id,
+                        muxStreamKey: newMasterStreamKey
+                    }
+                })
+                : await prisma.event.create({
+                    data: {
+                        title: "MASTER_STREAM",
+                        description: "Master livestream configuration for OBS",
+                        startTime: new Date(),
+                        isPublic: true,
+                        isLive: true,
+                        muxPlaybackId: newMasterPlaybackId,
+                        muxLiveStreamId: liveStream.id,
+                        muxStreamKey: newMasterStreamKey,
+                    }
+                });
+        }
+
+        if (!masterStream) {
+            res.status(500).json({ error: "Master stream could not be provisioned" });
+            return;
+        }
+
+        if (!masterStream.muxLiveStreamId && masterStream.muxStreamKey) {
+            const muxLiveStream = await getMuxLiveStreamForEvent({ muxStreamKey: masterStream.muxStreamKey });
+            if (muxLiveStream?.id) {
+                masterStream = await prisma.event.update({
+                    where: { id: masterStream.id },
+                    data: { muxLiveStreamId: muxLiveStream.id }
+                });
+            }
+        }
+
+        const streamKey = masterStream.muxStreamKey;
+        const playbackId = masterStream.muxPlaybackId;
+        const muxLiveStreamId = masterStream.muxLiveStreamId;
+
+        if (!streamKey || !playbackId) {
+            res.status(500).json({ error: "Master stream is not configured correctly" });
+            return;
+        }
+
+        // 1.5. CHECK FOR EXISTING INACTIVE EVENT on the persistent Mux stream.
+        // This keeps OBS on one stable stream key while each broadcast gets its own event row.
         const existingEvent = await prisma.event.findFirst({
             where: {
-                isLive: false, // Not currently live
-                isPublished: false, // Not published to viewers
-                muxStreamKey: { not: null } // Has valid stream key
+                title: { not: "MASTER_STREAM" },
+                isLive: false,
+                isPublished: false,
+                muxAssetId: null,
+                OR: [
+                    ...(muxLiveStreamId ? [{ muxLiveStreamId }] : []),
+                    { muxStreamKey: streamKey }
+                ]
             },
-            orderBy: { startTime: 'desc' } // Get most recent
+            orderBy: { startTime: 'desc' }
         });
 
         // If we found a recent inactive event, reuse it
@@ -231,11 +339,16 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             const updatedEvent = await prisma.event.update({
                 where: { id: existingEvent.id },
                 data: {
-                    isLive: true,
+                    isLive: false,
+                    isPublished: false,
                     title, // Update title if provided
                     ...(description && { description }),
                     ...(thumbnailUrl && { thumbnailUrl }),
-                    startTime: scheduledStartTime ? new Date(scheduledStartTime) : new Date()
+                    startTime: scheduledDate ?? new Date(),
+                    editorialStatus,
+                    muxPlaybackId: playbackId,
+                    muxLiveStreamId,
+                    muxStreamKey: streamKey
                 }
             });
 
@@ -252,39 +365,12 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                 streamKey: updatedEvent.muxStreamKey,
                 playbackId: updatedEvent.muxPlaybackId,
                 eventId: updatedEvent.id,
+                isScheduled,
+                lifecycleStage: isScheduled ? 'scheduled' : 'ready',
+                editorialStatus: updatedEvent.editorialStatus,
                 reused: true
             });
         }
-
-        // Otherwise, create a new stream
-        let liveStream: any;
-
-        try {
-            // 2. Call Mux to create the "Signal"
-            liveStream = await mux.video.liveStreams.create({
-                playback_policy: ['public'],
-                new_asset_settings: { playback_policy: ['public'] },
-                reconnect_window: 60, // Phase 4: Resilience (60s buffer for bad internet)
-                passthrough: title,
-            });
-        } catch (e: any) {
-            console.error("Mux Error:", e);
-            // Fallback for "Free Plan" error or other Mux issues during dev
-            if (e?.body?.error?.type === 'invalid_parameters' || e?.message?.includes('free plan')) {
-                console.log("⚠️ Using Mock Stream for Dev (Mux Free Plan Limit Reached)");
-                liveStream = {
-                    playback_ids: [{ id: "mock-playback-id" }],
-                    stream_keys: [{ key: "mock-stream-key-for-dev" }],
-                    id: "mock-stream-id"
-                };
-            } else {
-                throw e;
-            }
-        }
-
-        // 3. Save "Event" to Database
-        const streamKey = liveStream.stream_keys?.[0]?.key || liveStream.stream_key;
-        const playbackId = liveStream.playback_ids?.[0]?.id;
 
         const newEvent = await prisma.event.create({
             data: {
@@ -302,6 +388,7 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                 countdownOffsetMinutes: normalizedCountdownOffset,
                 scheduleSeriesId: normalizedScheduleSeriesId,
                 muxPlaybackId: playbackId,
+                muxLiveStreamId,
                 muxStreamKey: streamKey, // <--- THE SECRET WEAPON (Only sent to Media/Admin)
                 ...(thumbnailUrl && { thumbnailUrl }),
             },
@@ -545,7 +632,8 @@ export const publishStream = async (req: AuthRequest, res: Response) => {
             where: { id: eventId },
             data: {
                 isPublished: true,
-                editorialStatus: lifecycleStage === 'live' ? 'LIVE' : 'READY'
+                isLive: readiness.lifecycleStage === 'live' ? true : existingEvent.isLive,
+                editorialStatus: readiness.lifecycleStage === 'live' ? 'LIVE' : 'READY'
             }
         });
 
@@ -556,17 +644,17 @@ export const publishStream = async (req: AuthRequest, res: Response) => {
                 summary: `Published "${stream.title}" to viewers`,
                 eventId: stream.id,
                 metadata: {
-                    lifecycleStage,
+                    lifecycleStage: readiness.lifecycleStage,
                     readinessWarnings: readiness.warnings.map((warning) => warning.id),
                     confirmedChecklist: confirmedItems
                 }
             });
         }
 
-        io.emit('STREAM_PUBLISHED', { eventId: stream.id, lifecycleStage });
-        io.to(stream.id).emit('stream-status-changed', { isPublished: true, lifecycleStage });
+        io.emit('STREAM_PUBLISHED', { eventId: stream.id, lifecycleStage: readiness.lifecycleStage });
+        io.to(stream.id).emit('stream-status-changed', { isPublished: true, lifecycleStage: readiness.lifecycleStage });
 
-        if (lifecycleStage === 'live') {
+        if (readiness.lifecycleStage === 'live') {
             try {
                 await notifyAllMembers(
                     'LIVESTREAM_STARTED',
@@ -798,31 +886,59 @@ export const checkStreamStatus = async (req: AuthRequest, res: Response) => {
 
         // Query Mux for the actual stream status
         try {
-            const liveStreams = await mux.video.liveStreams.list({ limit: 100 });
-            
-            // Find the live stream that matches our stream key
-            const matchingStream = liveStreams.data?.find((stream: any) => {
-                const streamKey = stream.stream_keys?.[0]?.key || stream.stream_key;
-                return streamKey === event.muxStreamKey;
-            });
+            const matchingStream = await getMuxLiveStreamForEvent(event);
 
             if (!matchingStream) {
                 res.json({
                     isConnected: false,
                     message: "No live stream found in Mux",
-                    status: "idle"
+                    status: "idle",
+                    playbackId: event.muxPlaybackId,
+                    lifecycleStage
                 });
                 return;
             }
 
             // Check if the stream is active (status = 'active' means encoder is connected)
             const isConnected = matchingStream.status === 'active';
+            const livePlaybackId = matchingStream.playback_ids?.[0]?.id || event.muxPlaybackId;
+            let syncedEvent = event;
+
+            if (isConnected && (!event.isLive || event.muxPlaybackId !== livePlaybackId || event.muxLiveStreamId !== matchingStream.id)) {
+                syncedEvent = await prisma.event.update({
+                    where: { id: event.id },
+                    data: {
+                        isLive: true,
+                        editorialStatus: 'LIVE',
+                        ...(livePlaybackId ? { muxPlaybackId: livePlaybackId } : {}),
+                        ...(matchingStream.id ? { muxLiveStreamId: matchingStream.id } : {})
+                    }
+                });
+
+                const streamPayload = {
+                    eventId: syncedEvent.id,
+                    playbackId: syncedEvent.muxPlaybackId,
+                    isLive: true,
+                    isPublished: syncedEvent.isPublished,
+                    title: syncedEvent.title,
+                    startTime: syncedEvent.startTime,
+                    streamStartedAt: syncedEvent.startTime
+                };
+
+                io.to('control-room').emit('STREAM_ACTIVE', streamPayload);
+                io.to('control-room').emit('stream-went-live', streamPayload);
+                io.to(syncedEvent.id).emit('stream-status-changed', {
+                    isLive: true,
+                    isPublished: syncedEvent.isPublished,
+                    lifecycleStage: 'live'
+                });
+            }
 
             res.json({
                 isConnected,
                 status: matchingStream.status,
                 message: isConnected ? "Encoder connected and streaming" : "Waiting for encoder connection",
-                playbackId: event.muxPlaybackId,
+                playbackId: syncedEvent.muxPlaybackId,
                 lifecycleStage: isConnected ? 'live' : lifecycleStage
             });
 
@@ -870,6 +986,7 @@ export const debugStreamStatus = async (req: AuthRequest, res: Response) => {
                     id: e.id,
                     title: e.title,
                     muxStreamKey: e.muxStreamKey,
+                    muxLiveStreamId: e.muxLiveStreamId,
                     muxPlaybackId: e.muxPlaybackId,
                     isLive: e.isLive,
                     isPublished: e.isPublished,
@@ -997,5 +1114,120 @@ export const streamHeartbeat = async (req: AuthRequest, res: Response) => {
     } catch (error) {
         console.error("Stream Heartbeat Error:", error);
         res.status(500).json({ error: "Failed to process heartbeat" });
+    }
+};
+
+export const getStreamStats = async (req: AuthRequest, res: Response) => {
+    try {
+        const eventId = parseOptionalString(req.params.id);
+
+        if (!eventId) {
+            res.status(400).json({ error: "Event ID is required" });
+            return;
+        }
+
+        const event = await prisma.event.findUnique({
+            where: { id: eventId },
+            select: { id: true }
+        });
+
+        if (!event) {
+            res.status(404).json({ error: "Stream not found" });
+            return;
+        }
+
+        const activeSince = new Date(Date.now() - 30 * 1000);
+        const roomKeys = [`event:${eventId}`, `event-${eventId}`];
+
+        const [chatMessages, reactions, flaggedMessages, mutedUsers, currentViewers] = await Promise.all([
+            prisma.chatMessage.count({ where: { eventId } }),
+            prisma.contentReaction.count({ where: { eventId } }),
+            prisma.chatMessage.count({ where: { eventId, moderationStatus: 'FLAGGED' } }),
+            prisma.chatRoomMute.count({ where: { roomKey: { in: roomKeys } } }),
+            prisma.watchSession.count({
+                where: {
+                    eventId,
+                    endedAt: null,
+                    lastSeenAt: { gte: activeSince }
+                }
+            })
+        ]);
+
+        res.json({
+            chatMessages,
+            reactions,
+            flaggedMessages,
+            mutedUsers,
+            currentViewers
+        });
+    } catch (error) {
+        console.error("Stream stats error:", error);
+        res.status(500).json({ error: "Failed to load stream stats" });
+    }
+};
+
+export const updateStreamSettings = async (req: AuthRequest, res: Response) => {
+    try {
+        const eventId = parseOptionalString(req.params.id);
+
+        if (!eventId) {
+            res.status(400).json({ error: "Event ID is required" });
+            return;
+        }
+
+        const event = await prisma.event.findUnique({
+            where: { id: eventId },
+            select: { id: true }
+        });
+
+        if (!event) {
+            res.status(404).json({ error: "Stream not found" });
+            return;
+        }
+
+        const roomKey = `event:${eventId}`;
+        const existingSettings = await prisma.chatRoomSettings.findUnique({ where: { roomKey } });
+
+        const chatEnabled = typeof req.body.chatEnabled === 'boolean'
+            ? req.body.chatEnabled
+            : existingSettings?.chatEnabled ?? true;
+
+        const slowModeSeconds = typeof req.body.slowModeSeconds === 'number'
+            ? Math.max(0, Math.round(req.body.slowModeSeconds))
+            : typeof req.body.slowMode === 'boolean'
+                ? req.body.slowMode
+                    ? Math.max(existingSettings?.slowModeSeconds ?? 10, 10)
+                    : 0
+                : existingSettings?.slowModeSeconds ?? 0;
+
+        const settings = await prisma.chatRoomSettings.upsert({
+            where: { roomKey },
+            create: {
+                roomKey,
+                eventId,
+                chatEnabled,
+                slowModeSeconds
+            },
+            update: {
+                eventId,
+                chatEnabled,
+                slowModeSeconds
+            }
+        });
+
+        const payload = {
+            roomKey: settings.roomKey,
+            chatEnabled: settings.chatEnabled,
+            slowModeSeconds: settings.slowModeSeconds
+        };
+
+        io.to(roomKey).emit('chat-room-settings-updated', payload);
+        io.to(eventId).emit('stream-chat-settings-updated', payload);
+        io.to('control-room').emit('stream-chat-settings-updated', payload);
+
+        res.json({ settings: payload });
+    } catch (error) {
+        console.error("Stream settings error:", error);
+        res.status(500).json({ error: "Failed to update stream settings" });
     }
 };

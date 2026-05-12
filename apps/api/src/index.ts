@@ -7,6 +7,7 @@ import { prisma } from "./lib/prisma";
 import routes from "./routes";
 
 const app = express();
+app.set("etag", false);
 const corsOrigins = process.env.CORS_ORIGINS 
 	? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
 	: ['http://localhost:3000'];
@@ -91,12 +92,26 @@ async function checkForDisconnectedMedia() {
 // Run heartbeat check every 5 seconds
 setInterval(checkForDisconnectedMedia, 5000);
 
+type RequestWithRawBody = express.Request & { rawBody?: string };
+
 // 1. Security & Configuration
 app.use(cors({
 	origin: corsOrigins,
 	credentials: true // Allow cookies/headers if needed
 }));
-app.use(express.json());
+app.use((_req, res, next) => {
+	res.setHeader("Cache-Control", "no-store");
+	next();
+});
+app.use(express.json({
+	verify: (req, _res, buf) => {
+		const rawBodyRequest = req as RequestWithRawBody & { originalUrl?: string; url?: string };
+		const requestUrl = rawBodyRequest.originalUrl ?? rawBodyRequest.url;
+		if (requestUrl === "/webhooks/mux" || requestUrl === "/api/webhooks/mux") {
+			rawBodyRequest.rawBody = buf.toString("utf8");
+		}
+	}
+}));
 app.use((req, res, next) => {
 	const startedAt = Date.now();
 
