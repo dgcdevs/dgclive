@@ -10,6 +10,42 @@ import { getRecentBroadcastAuditLogs, recordBroadcastAuditLog } from '../lib/bro
 const RECURRENCE_RULES = ['NONE', 'DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY'] as const;
 const DEFAULT_STREAM_TITLE = 'Live Stream';
 
+// Check if Mux manifest is ready by verifying the master playlist is accessible
+const waitForManifestReadiness = async (playbackId: string, maxAttempts: number = 15): Promise<boolean> => {
+    if (!playbackId || playbackId.startsWith('mock')) {
+        return true; // Mock streams are always ready
+    }
+
+    const manifestUrl = `https://image.mux.com/${playbackId}/master.m3u8`;
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await fetch(manifestUrl, { method: 'HEAD' });
+            // Status 200 = manifest ready, 412 = not yet ready (still initializing)
+            if (response.status === 200) {
+                console.log(`[Manifest Ready] Playback ID ${playbackId} ready after ${attempt} attempt(s)`);
+                return true;
+            }
+            if (response.status === 412) {
+                console.log(`[Manifest Not Ready] Playback ID ${playbackId} - attempt ${attempt}/${maxAttempts}, status: ${response.status}`);
+            } else {
+                console.warn(`[Manifest Check] Unexpected status ${response.status} for ${playbackId}`);
+            }
+        } catch (error) {
+            console.warn(`[Manifest Check] Error checking ${playbackId}: ${error}`);
+        }
+
+        // Wait before retrying (exponential backoff: 200ms, 300ms, 400ms, etc)
+        if (attempt < maxAttempts) {
+            const delayMs = 200 + (attempt * 100);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+
+    console.warn(`[Manifest Ready] Timeout: Playback ID ${playbackId} not ready after ${maxAttempts} attempts`);
+    return false;
+};
+
 type MuxLookupEvent = {
     muxLiveStreamId?: string | null;
     muxStreamKey?: string | null;
@@ -316,6 +352,15 @@ export const startStream = async (req: AuthRequest, res: Response) => {
             return;
         }
 
+        // Verify manifest is ready after master stream setup
+        if (playbackId && !playbackId.startsWith('mock')) {
+            console.log(`[Stream Setup] Waiting for manifest readiness for ${playbackId}...`);
+            const isReady = await waitForManifestReadiness(playbackId);
+            if (!isReady) {
+                console.warn(`[Stream Setup] Manifest not ready after timeout, proceeding anyway`);
+            }
+        }
+
         // 1.5. CHECK FOR EXISTING INACTIVE EVENT on the persistent Mux stream.
         // This keeps OBS on one stable stream key while each broadcast gets its own event row.
         const existingEvent = await prisma.event.findFirst({
@@ -335,6 +380,12 @@ export const startStream = async (req: AuthRequest, res: Response) => {
         // If we found a recent inactive event, reuse it
         if (existingEvent && existingEvent.muxStreamKey && existingEvent.muxPlaybackId) {
             console.log(`[Stream Reuse] Reusing existing stream ${existingEvent.id} - same keys`);
+            
+            // Verify manifest is ready when reusing stream
+            const isReady = await waitForManifestReadiness(existingEvent.muxPlaybackId);
+            if (!isReady) {
+                console.warn(`[Stream Reuse] Manifest not ready after timeout, but proceeding with reuse`);
+            }
             
             const updatedEvent = await prisma.event.update({
                 where: { id: existingEvent.id },
@@ -626,6 +677,15 @@ export const publishStream = async (req: AuthRequest, res: Response) => {
                 readiness
             });
             return;
+        }
+
+        // Double-check manifest is ready before publishing to viewers
+        if (existingEvent.muxPlaybackId && !existingEvent.muxPlaybackId.startsWith('mock')) {
+            console.log(`[Stream Publish] Verifying manifest readiness for ${existingEvent.muxPlaybackId}...`);
+            const isReady = await waitForManifestReadiness(existingEvent.muxPlaybackId, 5);
+            if (!isReady) {
+                console.warn(`[Stream Publish] Manifest still not ready, but publishing anyway`);
+            }
         }
 
         const stream = await prisma.event.update({
