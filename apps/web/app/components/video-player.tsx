@@ -1,4 +1,5 @@
 import MuxPlayer from "@mux/mux-player-react";
+import { useState, useEffect } from "react";
 import { getFreshThumbnail } from "../lib/utils";
 
 interface VideoPlayerProps {
@@ -38,6 +39,41 @@ export function VideoPlayer({
     // - Pre-stream / curtain down → "live" (player boots silently in background)
     const streamType = isLive ? "live" : "on-demand"
 
+    // Track playback attempts to prevent infinite retry loops
+    const [playerKey, setPlayerKey] = useState(0)
+    const [retryCount, setRetryCount] = useState(0)
+    const maxRetries = 3
+
+    const handleMuxError = (event: any) => {
+        const error = event?.detail;
+        const errorDetails = error?.details || error?.type || "unknown error";
+        
+        // Log the error for debugging
+        console.error(`[VideoPlayer] Mux error: ${errorDetails}`, error);
+
+        // Handle 412 Precondition Failed (manifest not ready)
+        if (errorDetails === "manifestLoadError" && error?.response?.code === 412) {
+            if (retryCount < maxRetries) {
+                console.log(`[VideoPlayer] Manifest not ready, retrying (${retryCount + 1}/${maxRetries})...`);
+                // Wait before retrying (exponential backoff: 1s, 2s, 4s)
+                const delayMs = 1000 * Math.pow(2, retryCount);
+                setTimeout(() => {
+                    setRetryCount(retryCount + 1);
+                    // Force player remount by changing key
+                    setPlayerKey(prev => prev + 1);
+                }, delayMs);
+            } else {
+                console.error(`[VideoPlayer] Max retries (${maxRetries}) reached for manifest loading`);
+            }
+        }
+    }
+
+    // Reset retry count when playback ID changes
+    useEffect(() => {
+        setRetryCount(0);
+        setPlayerKey(0);
+    }, [muxPlaybackId]);
+
     return (
         <div className="group relative aspect-video w-full rounded-xl bg-black border border-white/10 overflow-hidden">
 
@@ -58,7 +94,7 @@ export function VideoPlayer({
                     {/* The player itself — only mounts when published or for media */}
                     {canViewStream && (
                         <div
-                            key={muxPlaybackId}
+                            key={`${muxPlaybackId}-${playerKey}`}
                             className="absolute inset-0 z-10"
                         >
                             <MuxPlayer
@@ -73,6 +109,7 @@ export function VideoPlayer({
                                     video_title: "Davidic Generation Church",
                                     viewer_user_id: "anonymous",
                                 }}
+                                onError={handleMuxError}
                             />
                         </div>
                     )}
