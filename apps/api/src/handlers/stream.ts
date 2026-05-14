@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/requireAuth';
-import { mux } from '../lib/mux';
+import { LOW_LATENCY_LIVE_STREAM_SETTINGS, ensureLowLatencyLiveStream, mux } from '../lib/mux';
 import { prisma } from '../lib/prisma';
 import { notifyAllMembers } from '../lib/notifications';
 import { io } from '../index';
@@ -249,7 +249,7 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                 liveStream = await mux.video.liveStreams.create({
                     playback_policy: ['public'],
                     new_asset_settings: { playback_policy: ['public'] },
-                    reconnect_window: 60,
+                    ...LOW_LATENCY_LIVE_STREAM_SETTINGS,
                     passthrough: 'MASTER_STREAM',
                 });
             } catch (e: any) {
@@ -259,7 +259,8 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                     liveStream = {
                         playback_ids: [{ id: "mock-master-playback-id" }],
                         stream_keys: [{ key: "mock-master-stream-key-for-dev" }],
-                        id: "mock-master-stream-id"
+                        id: "mock-master-stream-id",
+                        latency_mode: LOW_LATENCY_LIVE_STREAM_SETTINGS.latency_mode
                     };
                 } else {
                     throw e;
@@ -292,6 +293,12 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                 });
         }
 
+        try {
+            await ensureLowLatencyLiveStream(masterStream.muxLiveStreamId);
+        } catch (error) {
+            console.warn('[Mux] Failed to verify low-latency master stream mode:', error);
+        }
+
         if (!masterStream) {
             res.status(500).json({ error: "Master stream could not be provisioned" });
             return;
@@ -304,6 +311,11 @@ export const startStream = async (req: AuthRequest, res: Response) => {
                     where: { id: masterStream.id },
                     data: { muxLiveStreamId: muxLiveStream.id }
                 });
+                try {
+                    await ensureLowLatencyLiveStream(muxLiveStream.id);
+                } catch (error) {
+                    console.warn('[Mux] Failed to verify low-latency master stream mode:', error);
+                }
             }
         }
 
@@ -560,11 +572,21 @@ export const getStreamConfig = async (req: AuthRequest, res: Response) => {
             });
         }
 
+        let muxLiveStream: any = null;
+        try {
+            muxLiveStream = await ensureLowLatencyLiveStream(masterStream.muxLiveStreamId);
+        } catch (error) {
+            console.warn('[Mux] Failed to load stream diagnostics:', error);
+        }
+
         // Return the configuration
         res.json({
             masterStreamKey: masterStream.muxStreamKey,
             masterPlaybackId: masterStream.muxPlaybackId,
-            srtPassphrase: process.env.SRT_PASSPHRASE || undefined
+            srtPassphrase: muxLiveStream?.srt_passphrase || process.env.SRT_PASSPHRASE || undefined,
+            latencyMode: muxLiveStream?.latency_mode || LOW_LATENCY_LIVE_STREAM_SETTINGS.latency_mode,
+            activeIngestProtocol: muxLiveStream?.active_ingest_protocol,
+            status: muxLiveStream?.status
         });
     } catch (error) {
         console.error("Failed to get stream config", error);
@@ -902,6 +924,7 @@ export const checkStreamStatus = async (req: AuthRequest, res: Response) => {
             // Check if the stream is active (status = 'active' means encoder is connected)
             const isConnected = matchingStream.status === 'active';
             const livePlaybackId = matchingStream.playback_ids?.[0]?.id || event.muxPlaybackId;
+            const recentMetrics = (matchingStream as any).recent_metrics;
             let syncedEvent = event;
 
             if (isConnected && (!event.isLive || event.muxPlaybackId !== livePlaybackId || event.muxLiveStreamId !== matchingStream.id)) {
@@ -939,7 +962,16 @@ export const checkStreamStatus = async (req: AuthRequest, res: Response) => {
                 status: matchingStream.status,
                 message: isConnected ? "Encoder connected and streaming" : "Waiting for encoder connection",
                 playbackId: syncedEvent.muxPlaybackId,
-                lifecycleStage: isConnected ? 'live' : lifecycleStage
+                lifecycleStage: isConnected ? 'live' : lifecycleStage,
+                latencyMode: matchingStream.latency_mode,
+                activeIngestProtocol: matchingStream.active_ingest_protocol,
+                recentMetrics: recentMetrics
+                    ? {
+                        bitrate: recentMetrics.bitrate,
+                        bandwidth: recentMetrics.bandwidth,
+                        frameRate: recentMetrics.frame_rate
+                    }
+                    : null
             });
 
         } catch (muxError: any) {
