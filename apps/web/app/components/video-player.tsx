@@ -33,11 +33,8 @@ export function VideoPlayer({
     // Media can always see the stream; regular users see it only when published
     const canViewStream = isPublished || isMedia
 
-    // Derive the correct stream type:
-    // - Live + published → "live" (enables DVR scrubbing at live edge)
-    // - Not live (ended) → "on-demand" (full VOD replay)
-    // - Pre-stream / curtain down → "live" (player boots silently in background)
-    const streamType = isLive ? "live" : "on-demand"
+    // Use Mux low-latency live playback when the event is actively live.
+    const streamType = isLive ? "ll-live" : "on-demand"
 
     // Track playback attempts to prevent infinite retry loops
     const [playerKey, setPlayerKey] = useState(0)
@@ -101,6 +98,7 @@ export function VideoPlayer({
                                 streamType={streamType}
                                 playbackId={muxPlaybackId}
                                 autoPlay="any"
+                                targetLiveWindow={5}
                                 accentColor="#A828FF"
                                 primaryColor="#A828FF"
                                 style={{ height: '100%', width: '100%' }}

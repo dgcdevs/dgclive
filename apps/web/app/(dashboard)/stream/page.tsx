@@ -66,6 +66,8 @@ export default function ControlRoomPage() {
     const [masterStreamKey, setMasterStreamKey] = useState<string | null>(null)
     const [masterPlaybackId, setMasterPlaybackId] = useState<string | null>(null)
     const [srtPassphrase, setSrtPassphrase] = useState<string | null>(null)
+    const [latencyMode, setLatencyMode] = useState<string | null>(null)
+    const [activeIngestProtocol, setActiveIngestProtocol] = useState<string | null>(null)
     const [isGeneratingKey, setIsGeneratingKey] = useState(false)
     const [needsConfig, setNeedsConfig] = useState(false)
 
@@ -133,6 +135,8 @@ export default function ControlRoomPage() {
                 if (data.playbackId) {
                     setPlaybackId(data.playbackId);
                 }
+                if (data.latencyMode) setLatencyMode(data.latencyMode);
+                if (data.activeIngestProtocol) setActiveIngestProtocol(data.activeIngestProtocol);
                 setEncoderError(null); // Clear error on successful check
                 // Update obsStatus to 'live' when encoder is detected
                 if (data.isConnected) {
@@ -198,6 +202,8 @@ export default function ControlRoomPage() {
                 setMasterStreamKey(data.masterStreamKey)
                 setMasterPlaybackId(data.masterPlaybackId)
                 if (data.srtPassphrase) setSrtPassphrase(data.srtPassphrase)
+                if (data.latencyMode) setLatencyMode(data.latencyMode)
+                if (data.activeIngestProtocol) setActiveIngestProtocol(data.activeIngestProtocol)
                 console.log('[Master Stream] About to set needsConfig to false')
                 setNeedsConfig(false)
                 console.log('[Master Stream] needsConfig set to false')
@@ -370,6 +376,8 @@ export default function ControlRoomPage() {
                     if (data.masterStreamKey) setMasterStreamKey(data.masterStreamKey)
                     if (data.masterPlaybackId) setMasterPlaybackId(data.masterPlaybackId)
                     if (data.srtPassphrase) setSrtPassphrase(data.srtPassphrase)
+                    if (data.latencyMode) setLatencyMode(data.latencyMode)
+                    if (data.activeIngestProtocol) setActiveIngestProtocol(data.activeIngestProtocol)
                     setNeedsConfig(false)
                     setIsLoadingConfig(false)
                 })
@@ -967,7 +975,8 @@ export default function ControlRoomPage() {
                                 >
                                     <MuxPlayer
                                         playbackId={activePlaybackId}
-                                        streamType="live"
+                                        streamType="ll-live"
+                                        targetLiveWindow={5}
                                         autoPlay="muted"
                                         muted={true}
                                         poster=""
@@ -1132,6 +1141,8 @@ export default function ControlRoomPage() {
                                     <h3 className="text-[10px] font-black text-white/30 uppercase tracking-widest">Network Blueprint</h3>
                                     <DiagnosticRow label="Socket" status={socketConnected ? 'ok' : 'error'} message={socketConnected ? 'DGCLive HQ Online' : 'Signal Lost'} />
                                     <DiagnosticRow label="Mux Engine" status={activePlaybackId ? 'ok' : 'warning'} message={activePlaybackId ? 'Engine Armed' : 'Provisioning...'} />
+                                    <DiagnosticRow label="Latency Mode" status={latencyMode === 'low' ? 'ok' : 'warning'} message={latencyMode === 'low' ? 'Low latency active' : 'Checking Mux latency mode'} />
+                                    <DiagnosticRow label="OBS Ingest" status={activeIngestProtocol === 'srt' ? 'ok' : activeIngestProtocol ? 'warning' : 'warning'} message={activeIngestProtocol ? activeIngestProtocol.toUpperCase() : 'Waiting for encoder signal'} />
                                 </div>
                             </div>
                         )}
@@ -1379,8 +1390,8 @@ export default function ControlRoomPage() {
                                 />
                                 <DiagnosticRow
                                     label="Mux Configuration"
-                                    status={!masterStreamKey ? 'warning' : 'ok'}
-                                    message={masterStreamKey ? 'Stream credentials verified' : 'Provisioning incomplete'}
+                                    status={!masterStreamKey ? 'warning' : latencyMode === 'low' ? 'ok' : 'warning'}
+                                    message={masterStreamKey ? `Stream credentials verified${latencyMode ? `, ${latencyMode} latency` : ''}` : 'Provisioning incomplete'}
                                 />
                                 <DiagnosticRow
                                     label="Signal Health"

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { fetchChannelVideos } from '../lib/youtube';
-import { mux } from '../lib/mux';
+import { LOW_LATENCY_LIVE_STREAM_SETTINGS, ensureLowLatencyLiveStream, mux } from '../lib/mux';
 import { createNotification } from '../lib/notifications';
 import { io } from '../index';
 
@@ -296,7 +296,7 @@ export const setupMasterStream = async (req: Request, res: Response) => {
                 liveStream = await mux.video.liveStreams.create({
                     playback_policy: ['public'],
                     new_asset_settings: { playback_policy: ['public'] },
-                    reconnect_window: 60,
+                    ...LOW_LATENCY_LIVE_STREAM_SETTINGS,
                 });
             } catch (e: any) {
                 console.error("Mux Error:", e);
@@ -306,7 +306,8 @@ export const setupMasterStream = async (req: Request, res: Response) => {
                     liveStream = {
                         playback_ids: [{ id: "mock-master-playback-id" }],
                         stream_keys: [{ key: "mock-master-stream-key-for-dev" }],
-                        id: "mock-master-stream-id"
+                        id: "mock-master-stream-id",
+                        latency_mode: LOW_LATENCY_LIVE_STREAM_SETTINGS.latency_mode
                     };
                 } else {
                     throw e;
@@ -330,13 +331,29 @@ export const setupMasterStream = async (req: Request, res: Response) => {
                     muxStreamKey: streamKey,
                 }
             });
+        } else {
+            try {
+                await ensureLowLatencyLiveStream(masterStream.muxLiveStreamId);
+            } catch (error) {
+                console.warn('[Mux] Failed to verify low-latency master stream mode:', error);
+            }
+        }
+
+        let muxLiveStream: any = null;
+        try {
+            muxLiveStream = await ensureLowLatencyLiveStream(masterStream.muxLiveStreamId);
+        } catch (error) {
+            console.warn('[Mux] Failed to load master stream diagnostics:', error);
         }
 
         // Return the master stream credentials
         res.json({
             masterStreamKey: masterStream.muxStreamKey,
             masterPlaybackId: masterStream.muxPlaybackId,
-            srtPassphrase: process.env.SRT_PASSPHRASE || undefined
+            srtPassphrase: muxLiveStream?.srt_passphrase || process.env.SRT_PASSPHRASE || undefined,
+            latencyMode: muxLiveStream?.latency_mode || LOW_LATENCY_LIVE_STREAM_SETTINGS.latency_mode,
+            activeIngestProtocol: muxLiveStream?.active_ingest_protocol,
+            status: muxLiveStream?.status
         });
     } catch (error) {
         console.error("Failed to setup master stream", error);
